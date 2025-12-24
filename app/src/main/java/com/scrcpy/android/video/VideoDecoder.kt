@@ -6,7 +6,7 @@ import android.util.Log
 import android.view.Surface
 import com.scrcpy.android.network.SocketClient
 import kotlinx.coroutines.*
-import java.nio.ByteBuffer
+import java.io.DataInputStream
 
 class VideoDecoder(
     private val socketClient: SocketClient,
@@ -16,6 +16,7 @@ class VideoDecoder(
     private var mediaCodec: MediaCodec? = null
     private var isDecoding = false
     private val scope = CoroutineScope(Dispatchers.Default + Job())
+    private var inputStream: DataInputStream? = null
 
     companion object {
         private const val TAG = "VideoDecoder"
@@ -26,77 +27,98 @@ class VideoDecoder(
     fun start() {
         scope.launch {
             try {
+                Log.d(TAG, "Starting video decoder...")
                 setupDecoder()
                 startDecoding()
             } catch (e: Exception) {
-                Log.e(TAG, "Decoding error", e)
+                Log.e(TAG, "Decoder error", e)
             }
         }
     }
 
     private fun setupDecoder() {
-        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, WIDTH, HEIGHT)
+        inputStream = DataInputStream(socketClient.getInputStream())
         
-        mediaCodec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        mediaCodec?.configure(format, surface, null, 0)
-        mediaCodec?.start()
+        val format = MediaFormat.createVideoFormat(
+            MediaFormat.MIMETYPE_VIDEO_AVC,
+            WIDTH,
+            HEIGHT
+        )
+        
+        mediaCodec = MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_AVC).apply {
+            configure(format, surface, null, 0)
+            start()
+        }
         
         Log.d(TAG, "Decoder setup complete")
     }
 
     private fun startDecoding() {
         isDecoding = true
+        val bufferInfo = MediaCodec.BufferInfo()
         var frameCount = 0
+        var configReceived = false
 
-        Log.d(TAG, "Start decoding...")
+        Log.d(TAG, "Start decoding loop...")
 
         while (isDecoding) {
             try {
-                // 读取数据包头：[size(4字节)][flags(4字节)][timestamp(8字节)]
-                val headerBuffer = ByteArray(16)
-                if (!readFully(headerBuffer)) break
+                // 读取数据包头：4字节长度 + 8字节时间戳 + 4字节标志
+                val dataSize = inputStream?.readInt() ?: break
+                val timestamp = inputStream?.readLong() ?: break
+                val flags = inputStream?.readInt() ?: break
                 
-                val header = ByteBuffer.wrap(headerBuffer)
-                val dataSize = header.int
-                val flags = header.int
-                val timestamp = header.long
-                
-                if (dataSize <= 0 || dataSize > 1024 * 1024) {
+                if (dataSize <= 0 || dataSize > 2 * 1024 * 1024) {
                     Log.e(TAG, "Invalid data size: $dataSize")
                     break
                 }
                 
-                // 读取视频数据
-                val dataBuffer = ByteArray(dataSize)
-                if (!readFully(dataBuffer)) break
+                // 读取数据
+                val data = ByteArray(dataSize)
+                inputStream?.readFully(data)
+                
+                // 检查是否是配置帧
+                if ((flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
+                    Log.d(TAG, "Received config frame: $dataSize bytes")
+                    configReceived = true
+                }
                 
                 // 送入解码器
                 val inputBufferId = mediaCodec?.dequeueInputBuffer(10000)
                 if (inputBufferId != null && inputBufferId >= 0) {
                     val inputBuffer = mediaCodec?.getInputBuffer(inputBufferId)
                     inputBuffer?.clear()
-                    inputBuffer?.put(dataBuffer)
+                    inputBuffer?.put(data)
                     
                     mediaCodec?.queueInputBuffer(
-                        inputBufferId, 
-                        0, 
-                        dataSize, 
+                        inputBufferId,
+                        0,
+                        dataSize,
                         timestamp,
                         flags
                     )
                 }
                 
-                // 从解码器获取输出
-                val bufferInfo = MediaCodec.BufferInfo()
+                // 从解码器获取输出并渲染
                 val outputBufferId = mediaCodec?.dequeueOutputBuffer(bufferInfo, 0)
                 
-                if (outputBufferId != null && outputBufferId >= 0) {
-                    // 渲染到 Surface
-                    mediaCodec?.releaseOutputBuffer(outputBufferId, true)
-                    frameCount++
+                when {
+                    outputBufferId == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                        val outputFormat = mediaCodec?.outputFormat
+                        Log.d(TAG, "Output format changed: $outputFormat")
+                    }
                     
-                    if (frameCount % 30 == 0) {
-                        Log.d(TAG, "Decoded $frameCount frames")
+                    outputBufferId != null && outputBufferId >= 0 -> {
+                        // 渲染到 Surface（第二个参数 true 表示渲染）
+                        mediaCodec?.releaseOutputBuffer(outputBufferId, true)
+                        
+                        frameCount++
+                        if (frameCount == 1) {
+                            Log.d(TAG, "First frame decoded and rendered!")
+                        }
+                        if (frameCount % 30 == 0) {
+                            Log.d(TAG, "Decoded $frameCount frames")
+                        }
                     }
                 }
                 
@@ -109,24 +131,16 @@ class VideoDecoder(
         Log.d(TAG, "Decoding stopped, total frames: $frameCount")
     }
 
-    private fun readFully(buffer: ByteArray): Boolean {
-        var totalRead = 0
-        while (totalRead < buffer.size) {
-            val read = socketClient.readData(buffer, totalRead, buffer.size - totalRead)
-            if (read < 0) {
-                Log.e(TAG, "Socket read failed")
-                return false
-            }
-            totalRead += read
-        }
-        return true
-    }
-
     fun stop() {
         isDecoding = false
-        mediaCodec?.stop()
-        mediaCodec?.release()
+        try {
+            mediaCodec?.stop()
+            mediaCodec?.release()
+            inputStream?.close()
+            Log.d(TAG, "Decoder stopped")
+        } catch (e: Exception) {
+            Log.e(TAG, "Stop error", e)
+        }
         scope.cancel()
-        Log.d(TAG, "Decoder stopped")
     }
 }
