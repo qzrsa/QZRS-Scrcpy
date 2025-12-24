@@ -18,9 +18,11 @@ class SocketClient(private val host: String, private val port: Int) {
     suspend fun connect(): Boolean = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "Connecting to $host:$port...")
-            socket = Socket(host, port)
-            socket?.tcpNoDelay = true
-            socket?.keepAlive = true
+            socket = Socket(host, port).apply {
+                tcpNoDelay = true
+                keepAlive = true
+                soTimeout = 5000
+            }
             inputStream = socket?.getInputStream()
             Log.d(TAG, "Connected successfully")
             true
@@ -30,13 +32,8 @@ class SocketClient(private val host: String, private val port: Int) {
         }
     }
 
-    fun readData(buffer: ByteArray, offset: Int = 0, length: Int = buffer.size): Int {
-        return try {
-            inputStream?.read(buffer, offset, length) ?: -1
-        } catch (e: Exception) {
-            Log.e(TAG, "Read error", e)
-            -1
-        }
+    fun getInputStream(): InputStream {
+        return inputStream ?: throw IllegalStateException("Not connected")
     }
 
     fun disconnect() {
