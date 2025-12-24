@@ -1,7 +1,7 @@
 package com.scrcpy.android
 
 import android.os.Bundle
-import android.view.MotionEvent
+import android.util.Log
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.widget.Toast
@@ -17,6 +17,10 @@ class ControllerActivity : AppCompatActivity() {
     private var videoDecoder: VideoDecoder? = null
     private val scope = CoroutineScope(Dispatchers.Main + Job())
 
+    companion object {
+        private const val TAG = "ControllerActivity"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_controller)
@@ -26,13 +30,20 @@ class ControllerActivity : AppCompatActivity() {
         val ip = intent.getStringExtra("ip") ?: ""
         val port = intent.getIntExtra("port", 5555)
         
+        Log.d(TAG, "Controller started, connecting to $ip:$port")
+        
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
+                Log.d(TAG, "Surface created")
                 connectToDevice(ip, port, holder.surface)
             }
 
-            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+            override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                Log.d(TAG, "Surface changed: ${width}x${height}")
+            }
+            
             override fun surfaceDestroyed(holder: SurfaceHolder) {
+                Log.d(TAG, "Surface destroyed")
                 disconnect()
             }
         })
@@ -47,11 +58,13 @@ class ControllerActivity : AppCompatActivity() {
             }
             
             if (connected == true) {
-                Toast.makeText(this@ControllerActivity, "已连接", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@ControllerActivity, "已连接到 $ip:$port", Toast.LENGTH_SHORT).show()
+                Log.d(TAG, "Starting video decoder...")
                 videoDecoder = VideoDecoder(socketClient!!, surface)
                 videoDecoder?.start()
             } else {
-                Toast.makeText(this@ControllerActivity, "连接失败", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@ControllerActivity, "连接失败，请检查IP和端口", Toast.LENGTH_LONG).show()
+                Log.e(TAG, "Connection failed")
                 finish()
             }
         }
@@ -63,14 +76,9 @@ class ControllerActivity : AppCompatActivity() {
         scope.cancel()
     }
 
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        // 这里可以实现触摸事件的发送
-        // 需要额外的协议来传输控制指令
-        return super.onTouchEvent(event)
-    }
-
     override fun onDestroy() {
         super.onDestroy()
         disconnect()
+        Log.d(TAG, "Controller destroyed")
     }
 }
