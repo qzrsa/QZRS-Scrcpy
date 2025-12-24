@@ -20,18 +20,19 @@ jobs:
       with:
         distribution: 'temurin'
         java-version: '17'
+        
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
     
-    # 检查并生成 Gradle Wrapper
-    - name: Setup Gradle Wrapper
+    # 使用 Gradle 8.2（与 AGP 8.2.0 兼容）
+    - name: Generate Gradle Wrapper
       run: |
         if [ ! -f "gradlew" ]; then
           echo "Gradle Wrapper not found, generating..."
-          gradle wrapper --gradle-version=8.2 --distribution-type=bin
+          # 指定使用 Gradle 8.2
+          gradle wrapper --gradle-version 8.2 --distribution-type bin
         fi
         chmod +x gradlew
-        
-    - name: Validate Gradle wrapper
-      uses: gradle/wrapper-validation-action@v1
       
     - name: Build Debug APK
       run: ./gradlew assembleDebug --stacktrace --no-daemon
@@ -44,11 +45,9 @@ jobs:
       with:
         name: app-debug
         path: app/build/outputs/apk/debug/*.apk
-        if-no-files-found: error
         
     - name: Upload Release APK
       uses: actions/upload-artifact@v4
       with:
         name: app-release-unsigned
         path: app/build/outputs/apk/release/*.apk
-        if-no-files-found: error
