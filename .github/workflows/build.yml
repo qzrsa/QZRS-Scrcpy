@@ -24,36 +24,25 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
     
-    # 关键步骤：下载并安装指定版本的 Gradle
-    - name: Download and Install Gradle 8.2
-      run: |
-        wget https://services.gradle.org/distributions/gradle-8.2-bin.zip
-        unzip -q gradle-8.2-bin.zip
-        echo "$PWD/gradle-8.2/bin" >> $GITHUB_PATH
+    # 使用 Gradle Action 自动处理 Gradle 安装
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+      with:
+        gradle-version: 8.2
     
-    # 使用刚安装的 Gradle 8.2 生成 wrapper
-    - name: Generate Gradle Wrapper with Gradle 8.2
+    # 生成 Gradle Wrapper
+    - name: Generate Gradle Wrapper
       run: |
-        if [ ! -f "gradlew" ]; then
-          echo "Generating Gradle Wrapper..."
-          gradle-8.2/bin/gradle wrapper --gradle-version 8.2 --distribution-type bin
-        fi
+        gradle wrapper --gradle-version 8.2
         chmod +x gradlew
       
+    # 只编译 Debug APK
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace --no-daemon
+      run: ./gradlew assembleDebug --stacktrace
       
-    - name: Build Release APK
-      run: ./gradlew assembleRelease --stacktrace --no-daemon
-      
+    # 上传 APK
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
       with:
-        name: app-debug
-        path: app/build/outputs/apk/debug/*.apk
-        
-    - name: Upload Release APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: app-release-unsigned
-        path: app/build/outputs/apk/release/*.apk
+        name: AndroidScrcpy-Debug
+        path: app/build/outputs/apk/debug/app-debug.apk
