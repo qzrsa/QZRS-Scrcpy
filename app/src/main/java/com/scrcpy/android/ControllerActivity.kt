@@ -25,12 +25,16 @@ class ControllerActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_controller)
         
+        // 保持屏幕常亮
+        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        
         surfaceView = findViewById(R.id.surfaceView)
         
         val ip = intent.getStringExtra("ip") ?: ""
         val port = intent.getIntExtra("port", 5555)
         
-        Log.d(TAG, "Controller started, connecting to $ip:$port")
+        Log.d(TAG, "Controller started, will connect to $ip:$port")
+        Toast.makeText(this, "正在连接到 $ip:$port...", Toast.LENGTH_SHORT).show()
         
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
@@ -39,7 +43,7 @@ class ControllerActivity : AppCompatActivity() {
             }
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-                Log.d(TAG, "Surface changed: ${width}x${height}")
+                Log.d(TAG, "Surface changed: ${width}x${height}, format=$format")
             }
             
             override fun surfaceDestroyed(holder: SurfaceHolder) {
@@ -51,21 +55,47 @@ class ControllerActivity : AppCompatActivity() {
 
     private fun connectToDevice(ip: String, port: Int, surface: android.view.Surface) {
         scope.launch {
-            socketClient = SocketClient(ip, port)
-            
-            val connected = withContext(Dispatchers.IO) {
-                socketClient?.connect()
-            }
-            
-            if (connected == true) {
-                Toast.makeText(this@ControllerActivity, "已连接到 $ip:$port", Toast.LENGTH_SHORT).show()
-                Log.d(TAG, "Starting video decoder...")
-                videoDecoder = VideoDecoder(socketClient!!, surface)
-                videoDecoder?.start()
-            } else {
-                Toast.makeText(this@ControllerActivity, "连接失败，请检查IP和端口", Toast.LENGTH_LONG).show()
-                Log.e(TAG, "Connection failed")
-                finish()
+            try {
+                socketClient = SocketClient(ip, port)
+                
+                val connected = withContext(Dispatchers.IO) {
+                    socketClient?.connect()
+                }
+                
+                if (connected == true) {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this@ControllerActivity,
+                            "连接成功，开始接收视频...",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    
+                    Log.d(TAG, "Connection successful, starting decoder...")
+                    videoDecoder = VideoDecoder(socketClient!!, surface)
+                    videoDecoder?.start()
+                    
+                } else {
+                    runOnUiThread {
+                        Toast.makeText(
+                            this@ControllerActivity,
+                            "连接失败：无法连接到 $ip:$port\n请检查：\n1. IP地址是否正确\n2. 被控设备是否已启动服务\n3. 两台设备是否在同一WiFi",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    Log.e(TAG, "Connection failed")
+                    finish()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Connection error", e)
+                runOnUiThread {
+                    Toast.makeText(
+                        this@ControllerActivity,
+                        "连接错误: ${e.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                }
             }
         }
     }
