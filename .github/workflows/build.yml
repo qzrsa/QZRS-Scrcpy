@@ -24,13 +24,19 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
     
-    # 使用 Gradle 8.2（与 AGP 8.2.0 兼容）
-    - name: Generate Gradle Wrapper
+    # 关键步骤：下载并安装指定版本的 Gradle
+    - name: Download and Install Gradle 8.2
+      run: |
+        wget https://services.gradle.org/distributions/gradle-8.2-bin.zip
+        unzip -q gradle-8.2-bin.zip
+        echo "$PWD/gradle-8.2/bin" >> $GITHUB_PATH
+    
+    # 使用刚安装的 Gradle 8.2 生成 wrapper
+    - name: Generate Gradle Wrapper with Gradle 8.2
       run: |
         if [ ! -f "gradlew" ]; then
-          echo "Gradle Wrapper not found, generating..."
-          # 指定使用 Gradle 8.2
-          gradle wrapper --gradle-version 8.2 --distribution-type bin
+          echo "Generating Gradle Wrapper..."
+          gradle-8.2/bin/gradle wrapper --gradle-version 8.2 --distribution-type bin
         fi
         chmod +x gradlew
       
