@@ -192,15 +192,19 @@ export class H264Player {
       }
 
       let supports: VideoDecoderSupport | null = null
+      // 优先 no-preference：让 Chromium 根据当前 GPU 驱动自适应。AMD Radeon 等
+      // 驱动不稳的 GPU 上会自动回退到软件 H.264 解码，避免硬件路径输出 corrupt frame
+      // 导致"绿屏"（症状：canvas 显示纯绿 + 顶部少量像素残留，本机 AMD RX 9070 GRE 复现）。
       try {
-        supports = await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: 'prefer-hardware' })
+        supports = await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: 'no-preference' })
       } catch {
         supports = null
       }
 
       if (!supports || !supports.supported) {
+        // 兜底：显式强制软件解码
         try {
-          supports = await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: 'no-preference' })
+          supports = await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: 'prefer-software' })
         } catch {
           supports = null
         }
@@ -241,6 +245,9 @@ export class H264Player {
       this.canvas.width = frame.displayWidth
       this.canvas.height = frame.displayHeight
     }
+    // 先清屏再绘制：避免上一帧或 GPU 未初始化 buffer 残留（硬件 H.264 解码出 corrupt
+    // frame 时，残留区会显示 GPU 默认色 = 绿色，导致"大面积纯绿 + 顶部少量内容"）。
+    this.ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height)
     this.ctx?.drawImage(frame, 0, 0)
     frame.close()
   }
