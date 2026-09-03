@@ -156,6 +156,8 @@ export class H264Player {
     if (this.canvas.width === width && this.canvas.height === height) return
     this.canvas.width = width
     this.canvas.height = height
+    // 同步 CSS 渲染比例，max-width/max-height 缩放时保持 frame 物理宽高比
+    this.canvas.style.aspectRatio = `${width} / ${height}`
   }
 
   private extractSpsPps(data: Uint8Array): void {
@@ -244,6 +246,9 @@ export class H264Player {
     if (this.canvas.width !== frame.displayWidth || this.canvas.height !== frame.displayHeight) {
       this.canvas.width = frame.displayWidth
       this.canvas.height = frame.displayHeight
+      // 同步 CSS 渲染比例：max-width/max-height 缩放时保持 frame 物理宽高比
+      // （否则竖屏设备在横向窗口里会被 max-height 裁掉底部，max-width 拉出左右黑边）
+      this.canvas.style.aspectRatio = `${frame.displayWidth} / ${frame.displayHeight}`
     }
     // 先清屏再绘制：避免上一帧或 GPU 未初始化 buffer 残留（硬件 H.264 解码出 corrupt
     // frame 时，残留区会显示 GPU 默认色 = 绿色，导致"大面积纯绿 + 顶部少量内容"）。
