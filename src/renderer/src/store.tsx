@@ -41,8 +41,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     const offState = window.api.onSessionState((e) => {
       if (e.state === 'started') {
         setSessions((prev) => [
-          // 按 serial 去重：替换掉 pending 占位会话（其 sessionId 是 pending-...，
-          // 与真实 id 不同，必须按 serial 过滤，否则列表会残留占位导致 find 拿错）
+          // 按 serial 去重并置为 streaming：连接中占位无论 id 是否已换成真实 id，都统一按 serial 替换
           ...prev.filter((s) => s.serial !== e.serial),
           {
             sessionId: e.sessionId,
@@ -55,12 +54,12 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           }
         ])
       } else if (e.state === 'error') {
-        // 主进程 sessionId(sXXXX) 与 pending 占位(pending-${serial}-...) 不一致，
-        // 必须按 serial 清理，否则连接失败后僵尸占位永远卡在 connecting，
-        // 卡片显示"运行中"却收不到帧（表现为"点了没反应"）。
+        // 主进程 sessionId(sXXXX) 与占位 id 不同，按 serial 清理（连接失败时避免僵尸占位卡 connecting）。
         setSessions((prev) => prev.filter((s) => s.serial !== e.serial))
       } else if (e.state === 'stopped') {
-        setSessions((prev) => prev.filter((s) => s.sessionId !== e.sessionId))
+        // 与 started/error 保持一致，按 serial 清理：连接中服务器断开时，占位 id 可能与真实 id 不同，
+        // 若仍按 sessionId 过滤会漏掉占位，导致卡片永久显示"运行中"却收不到帧。
+        setSessions((prev) => prev.filter((s) => s.serial !== e.serial))
       }
     })
     const offMeta = window.api.onStreamMeta((m) => {
@@ -85,10 +84,14 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       ...(settings?.session ?? {}),
       ...overrides
     }
+    // 先用临时 id 占位（立即给用户"连接中"反馈），拿到主进程返回的真实 sessionId 后再替换。
+    // 这样后续 started/error/stopped、stopSession、sendControl 都使用同一套真实 id，避免双 id 错配。
+    const tempId = `pending-${serial}-${Date.now()}`
     setSessions((prev) => [
-      ...prev,
+      // 按 serial 去重，防止同一设备残留旧占位导致重复建连
+      ...prev.filter((s) => s.serial !== serial),
       {
-        sessionId: `pending-${serial}-${Date.now()}`,
+        sessionId: tempId,
         serial,
         deviceName: serial,
         width: 0,
@@ -97,7 +100,11 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         status: 'connecting'
       }
     ])
-    await window.api.startSession(serial, opts)
+    const { sessionId } = await window.api.startSession(serial, opts)
+    // 主进程同步失败时返回空 id（此时已通过 error 事件按 serial 清掉占位），无需替换
+    if (sessionId) {
+      setSessions((prev) => prev.map((s) => (s.sessionId === tempId ? { ...s, sessionId } : s)))
+    }
   }, [settings])
 
   const stopSession = useCallback(async (sessionId: string) => {

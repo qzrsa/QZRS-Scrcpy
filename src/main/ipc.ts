@@ -107,8 +107,9 @@ export function registerIpc(store: Store): AppManager {
         send('session:meta', meta)
       },
       onStopped: (sid) => {
+        const serial = sessions.get(sid)?.serial ?? ''
         sessions.delete(sid)
-        send('session:state', { sessionId: sid, state: 'stopped' } satisfies SessionStateEvent)
+        send('session:state', { sessionId: sid, serial, state: 'stopped' } satisfies SessionStateEvent)
       },
       onError: (sid, message) => {
         const serial = sessions.get(sid)?.serial ?? ''
@@ -172,7 +173,17 @@ export function registerIpc(store: Store): AppManager {
     }
   })
 
-  ipcMain.handle('session:start', (_e, serial: string, opts: SessionOptions) => startSession(serial, opts))
+  ipcMain.handle('session:start', (_e, serial: string, opts: SessionOptions) => {
+    try {
+      return { sessionId: startSession(serial, opts).sessionId }
+    } catch (err) {
+      // 同步失败（如未找到 adb / scrcpy-server）：startSession 里 ensureAdb() 会 throw，
+      // 这里转为 error 事件，让渲染层按 serial 清理占位并弹错误提示，而非静默卡在 connecting。
+      const msg = err instanceof Error ? err.message : String(err)
+      send('session:state', { sessionId: '', serial, state: 'error', message: msg } satisfies SessionStateEvent)
+      return { sessionId: '' }
+    }
+  })
   ipcMain.handle('session:stop', async (_e, sessionId: string) => {
     const h = sessions.get(sessionId)
     if (h) await h.session.stop()

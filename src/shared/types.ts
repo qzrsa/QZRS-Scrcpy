@@ -53,7 +53,7 @@ export interface FrameEvent {
 
 export type SessionStateEvent =
   | { sessionId: string; state: 'started'; serial: string; deviceName: string; width: number; height: number }
-  | { sessionId: string; state: 'stopped' }
+  | { sessionId: string; state: 'stopped'; serial: string }
   | { sessionId: string; state: 'error'; serial: string; message: string }
   | { sessionId: string; state: 'clipboard'; text: string }
 
