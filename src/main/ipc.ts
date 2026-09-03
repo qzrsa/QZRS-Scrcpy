@@ -111,8 +111,9 @@ export function registerIpc(store: Store): AppManager {
         send('session:state', { sessionId: sid, state: 'stopped' } satisfies SessionStateEvent)
       },
       onError: (sid, message) => {
+        const serial = sessions.get(sid)?.serial ?? ''
         sessions.delete(sid)
-        send('session:state', { sessionId: sid, state: 'error', message } satisfies SessionStateEvent)
+        send('session:state', { sessionId: sid, serial, state: 'error', message } satisfies SessionStateEvent)
         log(`[错误] ${message}`)
       },
       onClipboard: (sid, text) => {

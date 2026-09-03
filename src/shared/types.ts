@@ -54,7 +54,7 @@ export interface FrameEvent {
 export type SessionStateEvent =
   | { sessionId: string; state: 'started'; serial: string; deviceName: string; width: number; height: number }
   | { sessionId: string; state: 'stopped' }
-  | { sessionId: string; state: 'error'; message: string }
+  | { sessionId: string; state: 'error'; serial: string; message: string }
   | { sessionId: string; state: 'clipboard'; text: string }
 
 export type KeyEventAction = 0 | 1 // 0 = DOWN, 1 = UP

@@ -55,9 +55,10 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
           }
         ])
       } else if (e.state === 'error') {
-        setSessions((prev) =>
-          prev.map((s) => (s.sessionId === e.sessionId ? { ...s, status: 'error', error: e.message } : s))
-        )
+        // 主进程 sessionId(sXXXX) 与 pending 占位(pending-${serial}-...) 不一致，
+        // 必须按 serial 清理，否则连接失败后僵尸占位永远卡在 connecting，
+        // 卡片显示"运行中"却收不到帧（表现为"点了没反应"）。
+        setSessions((prev) => prev.filter((s) => s.serial !== e.serial))
       } else if (e.state === 'stopped') {
         setSessions((prev) => prev.filter((s) => s.sessionId !== e.sessionId))
       }

@@ -79,11 +79,14 @@ export default function App(): JSX.Element {
     [startSession]
   )
 
-  // 点击设备卡片：切换到该设备；若尚未连接则顺带建立连接
+  // 点击设备卡片：切换到该设备；若尚未连接则顺带建立连接。
+  // connecting/streaming 都算"已有会话"（避免重复建立连接）；error 会被 store 按 serial 清掉，故不在此列。
   const handleSelect = useCallback(
     (serial: string): void => {
       setActiveSerial(serial)
-      const exists = sessions.some((s) => s.serial === serial && s.status !== 'error')
+      const exists = sessions.some(
+        (s) => s.serial === serial && (s.status === 'streaming' || s.status === 'connecting')
+      )
       if (!exists) void startSession(serial)
     },
     [sessions, startSession]
