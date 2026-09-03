@@ -1,0 +1,11 @@
+# 依赖
+node_modules/
+
+# 构建产物
+out/
+dist/
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db

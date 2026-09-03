@@ -1,0 +1,196 @@
+// Android keycode constants and a PC keyboard -> Android keycode mapping.
+
+export const KEYCODE = {
+  HOME: 3,
+  BACK: 4,
+  CALL: 5,
+  ENDCALL: 6,
+  VOLUME_UP: 24,
+  VOLUME_DOWN: 25,
+  POWER: 26,
+  CAMERA: 27,
+  CLEAR: 28,
+  A: 29,
+  B: 30,
+  C: 31,
+  D: 32,
+  E: 33,
+  F: 34,
+  G: 35,
+  H: 36,
+  I: 37,
+  J: 38,
+  K: 39,
+  L: 40,
+  M: 41,
+  N: 42,
+  O: 43,
+  P: 44,
+  Q: 45,
+  R: 46,
+  S: 47,
+  T: 48,
+  U: 49,
+  V: 50,
+  W: 51,
+  X: 52,
+  Y: 53,
+  Z: 54,
+  COMMA: 55,
+  PERIOD: 56,
+  ALT_LEFT: 57,
+  ALT_RIGHT: 58,
+  SHIFT_LEFT: 59,
+  SHIFT_RIGHT: 60,
+  TAB: 61,
+  SPACE: 62,
+  SYM: 63,
+  EXPLORER: 64,
+  ENVELOPE: 65,
+  ENTER: 66,
+  DEL: 67,
+  GRAVE: 68,
+  MINUS: 69,
+  EQUALS: 70,
+  LEFT_BRACKET: 71,
+  RIGHT_BRACKET: 72,
+  BACKSLASH: 73,
+  SEMICOLON: 74,
+  APOSTROPHE: 75,
+  SLASH: 76,
+  AT: 77,
+  NUM: 78,
+  PLUS: 81,
+  MENU: 82,
+  NOTIFICATION: 83,
+  SEARCH: 84,
+  MEDIA_PLAY_PAUSE: 85,
+  MEDIA_STOP: 86,
+  MEDIA_NEXT: 87,
+  MEDIA_PREVIOUS: 88,
+  MEDIA_REWIND: 89,
+  MEDIA_FAST_FORWARD: 90,
+  MUTE: 91,
+  PAGE_UP: 92,
+  PAGE_DOWN: 93,
+  ESCAPE: 111,
+  FORWARD_DEL: 112,
+  CTRL_LEFT: 113,
+  CTRL_RIGHT: 114,
+  CAPS_LOCK: 115,
+  SCROLL_LOCK: 116,
+  META_LEFT: 117,
+  META_RIGHT: 118,
+  MOVE_HOME: 122,
+  MOVE_END: 123,
+  INSERT: 124,
+  DPAD_UP: 19,
+  DPAD_DOWN: 20,
+  DPAD_LEFT: 21,
+  DPAD_RIGHT: 22,
+  DPAD_CENTER: 23,
+  F1: 131,
+  F2: 132,
+  F3: 133,
+  F4: 134,
+  F5: 135,
+  F6: 136,
+  F7: 137,
+  F8: 138,
+  F9: 139,
+  F10: 140,
+  F11: 141,
+  F12: 142,
+  APP_SWITCH: 187,
+  SLEEP: 223,
+  WAKEUP: 224
+} as const
+
+export const META = {
+  NONE: 0,
+  SHIFT_ON: 0x01,
+  ALT_ON: 0x02,
+  CTRL_ON: 0x1000,
+  META_ON: 0x10000
+} as const
+
+/** Android button flags for mouse input. */
+export const BUTTON = {
+  PRIMARY: 1,
+  SECONDARY: 2,
+  TERTIARY: 4,
+  BACK: 8,
+  FORWARD: 16
+} as const
+
+/**
+ * Map a DOM KeyboardEvent.code to an Android keycode, or null if unmappable.
+ */
+export function keycodeFromEventCode(code: string): number | null {
+  const map: Record<string, number> = {
+    Home: KEYCODE.HOME,
+    Backspace: KEYCODE.DEL,
+    Enter: KEYCODE.ENTER,
+    NumpadEnter: KEYCODE.ENTER,
+    Space: KEYCODE.SPACE,
+    Tab: KEYCODE.TAB,
+    Escape: KEYCODE.ESCAPE,
+    Delete: KEYCODE.FORWARD_DEL,
+    ArrowUp: KEYCODE.DPAD_UP,
+    ArrowDown: KEYCODE.DPAD_DOWN,
+    ArrowLeft: KEYCODE.DPAD_LEFT,
+    ArrowRight: KEYCODE.DPAD_RIGHT,
+    PageUp: KEYCODE.PAGE_UP,
+    PageDown: KEYCODE.PAGE_DOWN,
+    End: KEYCODE.MOVE_END,
+    Insert: KEYCODE.INSERT,
+    ContextMenu: KEYCODE.MENU,
+    Backquote: KEYCODE.GRAVE,
+    Minus: KEYCODE.MINUS,
+    Equal: KEYCODE.EQUALS,
+    BracketLeft: KEYCODE.LEFT_BRACKET,
+    BracketRight: KEYCODE.RIGHT_BRACKET,
+    Backslash: KEYCODE.BACKSLASH,
+    Semicolon: KEYCODE.SEMICOLON,
+    Quote: KEYCODE.APOSTROPHE,
+    Comma: KEYCODE.COMMA,
+    Period: KEYCODE.PERIOD,
+    Slash: KEYCODE.SLASH,
+    ShiftLeft: KEYCODE.SHIFT_LEFT,
+    ShiftRight: KEYCODE.SHIFT_RIGHT,
+    ControlLeft: KEYCODE.CTRL_LEFT,
+    ControlRight: KEYCODE.CTRL_RIGHT,
+    AltLeft: KEYCODE.ALT_LEFT,
+    AltRight: KEYCODE.ALT_RIGHT,
+    MetaLeft: KEYCODE.META_LEFT,
+    MetaRight: KEYCODE.META_RIGHT,
+    CapsLock: KEYCODE.CAPS_LOCK,
+    F1: KEYCODE.F1,
+    F2: KEYCODE.F2,
+    F3: KEYCODE.F3,
+    F4: KEYCODE.F4,
+    F5: KEYCODE.F5,
+    F6: KEYCODE.F6,
+    F7: KEYCODE.F7,
+    F8: KEYCODE.F8,
+    F9: KEYCODE.F9,
+    F10: KEYCODE.F10,
+    F11: KEYCODE.F11,
+    F12: KEYCODE.F12
+  }
+  // letters
+  if (/^Key[A-Z]$/.test(code)) {
+    const ch = code.charCodeAt(3) - 65
+    return KEYCODE.A + ch
+  }
+  // digits
+  if (/^Digit[0-9]$/.test(code)) {
+    const d = Number(code.slice(5))
+    return 7 + d
+  }
+  if (/^Numpad[0-9]$/.test(code)) {
+    const d = Number(code.slice(6))
+    return 7 + d
+  }
+  return map[code] ?? null
+}
