@@ -47,7 +47,13 @@ const api = {
 
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   setSettings: (s: AppSettings): Promise<void> => ipcRenderer.invoke('settings:set', s),
-  resolvePaths: (): Promise<{ adbPath: string; serverPath: string }> => ipcRenderer.invoke('settings:resolvePaths'),
+  resolvePaths: (): Promise<{ adbPath: string; serverPath: string; scrcpyPath: string }> =>
+    ipcRenderer.invoke('settings:resolvePaths'),
+  resolveScrcpy: (): Promise<string> => ipcRenderer.invoke('external-scrcpy:resolve'),
+  launchExternalScrcpy: (serial: string): Promise<OpResult> =>
+    ipcRenderer.invoke('external-scrcpy:launch', serial),
+  stopExternalScrcpy: (serial: string): Promise<void> =>
+    ipcRenderer.invoke('external-scrcpy:stop', serial),
   getKeymaps: (): Promise<KeymapConfig[]> => ipcRenderer.invoke('keymaps:get'),
   setKeymaps: (k: KeymapConfig[]): Promise<void> => ipcRenderer.invoke('keymaps:set', k),
   writeClipboard: (text: string): void => ipcRenderer.send('clipboard:write', text),

@@ -6,6 +6,7 @@ import type { AppSettings, KeymapConfig } from '@shared/types'
 const DEFAULT_SETTINGS: AppSettings = {
   adbPath: '',
   serverPath: '',
+  scrcpyPath: '',
   theme: 'dark',
   groupControl: false,
   session: {

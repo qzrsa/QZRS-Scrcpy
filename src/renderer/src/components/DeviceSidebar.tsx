@@ -99,6 +99,18 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
               >
                 {running ? <span className="stop-square" /> : <IconPlay width={15} height={15} />}
               </button>
+              <button
+                className="icon-btn"
+                disabled={isBusy || d.state !== 'device'}
+                onClick={async (e) => {
+                  e.stopPropagation()
+                  const r = await window.api.launchExternalScrcpy(d.serial)
+                  if (!r.ok) alert(r.message || '启动 scrcpy 失败')
+                }}
+                title="在 Scrcpy 独立窗口中查看（WebCodecs 渲染异常时的回退方案）"
+              >
+                <IconSettings width={13} height={13} />
+              </button>
             </div>
           )
         })}

@@ -6,7 +6,7 @@ import { Drawer } from './Drawer'
 export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element {
   const { settings, updateSettings } = useApp()
   const [draft, setDraft] = useState<AppSettings>(settings)
-  const [resolved, setResolved] = useState<{ adbPath: string; serverPath: string } | null>(null)
+  const [resolved, setResolved] = useState<{ adbPath: string; serverPath: string; scrcpyPath: string } | null>(null)
 
   useEffect(() => {
     void window.api.resolvePaths().then(setResolved)
@@ -43,6 +43,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
           onChange={(e) => patch({ serverPath: e.target.value })}
         />
         <div className="hint">已检测：{resolved?.serverPath || '未找到'}</div>
+      </div>
+
+      <div className="field">
+        <label>scrcpy.exe 路径（备用渲染）</label>
+        <input
+          className="text-input"
+          value={draft.scrcpyPath}
+          placeholder="留空自动在 PATH / Program Files / platform-tools 中查找"
+          onChange={(e) => patch({ scrcpyPath: e.target.value })}
+        />
+        <div className="hint">已检测：{resolved?.scrcpyPath || '未找到'}（仅在 WebCodecs 渲染异常时使用）</div>
       </div>
 
       <div className="field">

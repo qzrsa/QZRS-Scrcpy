@@ -1,10 +1,11 @@
 import { ipcMain, dialog, clipboard, app, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { writeFileSync, copyFileSync } from 'node:fs'
 import { join, basename } from 'node:path'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { AdbClient } from './adb'
 import { ScrcpySession } from './session'
 import { Store } from './stores'
-import { findAdb, findServer } from './util'
+import { findAdb, findServer, findScrcpy } from './util'
 import type {
   DeviceInfo,
   SessionOptions,
@@ -28,6 +29,9 @@ interface SessionHandle {
 export function registerIpc(store: Store): AppManager {
   const sessions = new Map<string, SessionHandle>()
   const records = new Map<string, string>() // serial -> remote record path
+  // 外部 scrcpy.exe 子进程（serial -> ChildProcess），用于在 WebCodecs 渲染异常时
+  // 临时回退到官方 scrcpy 自己的 SDL 窗口看画面（不嵌入，独立窗口）。
+  const externalScrcpys = new Map<string, ChildProcess>()
   let adb: AdbClient | null = null
   let adbPath = ''
   let serverPath = ''
@@ -189,6 +193,64 @@ export function registerIpc(store: Store): AppManager {
     if (h) await h.session.stop()
     sessions.delete(sessionId)
   })
+
+  // ---- external scrcpy fallback ----
+  // 当内置 WebCodecs 渲染异常（绿屏 / 竖屏裁切）时，作为临时回退方案启动官方
+  // scrcpy.exe 独立窗口；不嵌入到 Electron 窗口（嵌入需要 Win32 SetParent/native module），
+  // 后续再做。后端不接管视频流，控制指令继续走原来的 session:control（如果已起会话）。
+  ipcMain.handle('external-scrcpy:launch', async (_e, serial: string) => {
+    if (externalScrcpys.has(serial)) {
+      return { ok: true, message: '已存在 scrcpy 窗口' }
+    }
+    const settings = store.getSettings()
+    const exe = findScrcpy(settings.scrcpyPath)
+    if (!exe) {
+      return {
+        ok: false,
+        message: '未找到 scrcpy.exe，请在设置里指定 scrcpy 路径或安装官方 scrcpy 后加入 PATH'
+      }
+    }
+    try {
+      const proc = spawn(
+        exe,
+        ['-s', serial, '--window-title', `ScrcpyControl - ${serial}`, '--no-control=false'],
+        {
+          windowsHide: false,
+          stdio: 'ignore',
+          detached: false
+        }
+      )
+      externalScrcpys.set(serial, proc)
+      proc.on('exit', () => {
+        externalScrcpys.delete(serial)
+        log(`[scrcpy] 窗口已关闭 serial=${serial}`)
+      })
+      proc.on('error', (e) => {
+        externalScrcpys.delete(serial)
+        log(`[scrcpy] 启动失败: ${e.message}`)
+      })
+      log(`[scrcpy] 已启动 external-scrcpy serial=${serial}`)
+      return { ok: true, path: exe }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return { ok: false, message: msg }
+    }
+  })
+  ipcMain.handle('external-scrcpy:stop', async (_e, serial: string) => {
+    const proc = externalScrcpys.get(serial)
+    if (proc) {
+      try {
+        proc.kill('SIGKILL')
+      } catch {
+        /* ignore */
+      }
+      externalScrcpys.delete(serial)
+    }
+  })
+  ipcMain.handle('external-scrcpy:resolve', () => {
+    const settings = store.getSettings()
+    return findScrcpy(settings.scrcpyPath) ?? ''
+  })
   ipcMain.on('session:control', (_e, sessionId: string, cmd: ControlCommand) => {
     const h = sessions.get(sessionId)
     if (h) h.session.sendControl(cmd)
@@ -343,6 +405,15 @@ export function registerIpc(store: Store): AppManager {
         await h.session.stop()
       }
       sessions.clear()
+      // 关闭所有外部 scrcpy 子进程，避免退出后 scrcpy.exe 残留
+      for (const proc of externalScrcpys.values()) {
+        try {
+          proc.kill('SIGKILL')
+        } catch {
+          /* ignore */
+        }
+      }
+      externalScrcpys.clear()
       // 停止仍在录屏的设备，避免退出后 screenrecord 进程残留占满存储
       if (adb) {
         for (const [serial, remote] of records) {

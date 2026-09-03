@@ -77,6 +77,34 @@ export function findServer(explicit?: string): string | null {
   return null
 }
 
+/**
+ * Locate the official scrcpy CLI (scrcpy.exe on Windows). Used as a fallback
+ * to launch scrcpy's own SDL window when the built-in WebCodecs renderer has
+ * issues (e.g. green screen / aspect-ratio glitches on certain GPUs).
+ */
+export function findScrcpy(explicit?: string): string | null {
+  if (explicit && existsSync(explicit)) return explicit
+  const exe = process.platform === 'win32' ? 'scrcpy.exe' : 'scrcpy'
+  const candidates: string[] = []
+  if (process.env.SCRCPY_HOME) candidates.push(join(process.env.SCRCPY_HOME, exe))
+  // PATH lookup
+  const pathDirs = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':')
+  for (const d of pathDirs) {
+    if (d) candidates.push(join(d, exe))
+  }
+  // Common install locations
+  const local = join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WindowsApps', exe)
+  candidates.push(local)
+  candidates.push(join(process.env.ProgramFiles || 'C:\\Program Files', 'scrcpy', exe))
+  candidates.push('C:\\platform-tools\\' + exe)
+  // Bundled with the app (optional)
+  candidates.push(join(app.getAppPath(), 'resources', 'scrcpy', exe))
+  for (const c of candidates) {
+    if (c && existsSync(c)) return c
+  }
+  return null
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
 }

@@ -96,6 +96,8 @@ export type ControlCommand =
 export interface AppSettings {
   adbPath: string
   serverPath: string
+  /** Path to official scrcpy.exe (fallback renderer when built-in WebCodecs glitches) */
+  scrcpyPath: string
   theme: 'dark' | 'light' | 'system'
   /** default session options */
   session: Omit<SessionOptions, 'audio'>
