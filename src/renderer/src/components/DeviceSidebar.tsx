@@ -6,11 +6,12 @@ import { IconRefresh, IconWifi, IconUsb, IconPhone, IconPlay, IconSettings } fro
 interface Props {
   activeSessionSerial: string | null
   onStart: (serial: string) => void
+  onSelect: (serial: string) => void
   onOpenConnect: () => void
   onOpenSettings: () => void
 }
 
-export function DeviceSidebar({ activeSessionSerial, onStart, onOpenConnect, onOpenSettings }: Props): JSX.Element {
+export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenConnect, onOpenSettings }: Props): JSX.Element {
   const { devices, sessions, refreshDevices, stopSession } = useApp()
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -69,8 +70,16 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onOpenConnect, onO
         {devices.map((d) => {
           const running = runningFor(d.serial)
           const isBusy = busy === d.serial
+          const isSelected = activeSessionSerial === d.serial
           return (
-            <div key={d.serial} className={`device-card ${running ? 'active' : ''}`}>
+            <div
+              key={d.serial}
+              className={`device-card ${isSelected ? 'active' : ''}`}
+              onClick={() => {
+                if (d.state === 'device' && !isBusy) onSelect(d.serial)
+              }}
+              title={running ? '点击切换到此设备' : '点击开始镜像'}
+            >
               <div className={`device-dot ${d.state}`} />
               <div className="device-info">
                 <div className="device-name" title={d.serial}>{d.model || d.serial}</div>
@@ -82,7 +91,10 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onOpenConnect, onO
               <button
                 className={`icon-btn ${running ? 'stop' : 'start'}`}
                 disabled={isBusy || d.state !== 'device'}
-                onClick={() => void handleToggle(d)}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void handleToggle(d)
+                }}
                 title={running ? '断开' : '开始镜像'}
               >
                 {running ? <span className="stop-square" /> : <IconPlay width={15} height={15} />}

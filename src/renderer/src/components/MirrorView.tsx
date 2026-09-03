@@ -34,6 +34,15 @@ export function MirrorView({ session, send, onError, onFullscreen }: Props): JSX
         player.feed(e.data, e.isConfig, e.isKey)
       }
     })
+
+    // 切回一个已在推流的会话（或初次连接由 connecting→streaming 重建解码器）时，
+    // 设备只在流启动时发一次 SPS/PPS config，新建的解码器收不到 config 会一直黑屏。
+    // 主动 resetVideo 让设备立即重发 config + 关键帧（官方为"新增播放器"设计的机制）。
+    // 直接 sendControl 而非走 send()，避免群控开启时被广播到所有会话。
+    if (session && session.status === 'streaming') {
+      window.api.sendControl(session.sessionId, { type: 'resetVideo' })
+    }
+
     return () => {
       offFrame()
       player.dispose()

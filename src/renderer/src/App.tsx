@@ -79,6 +79,16 @@ export default function App(): JSX.Element {
     [startSession]
   )
 
+  // 点击设备卡片：切换到该设备；若尚未连接则顺带建立连接
+  const handleSelect = useCallback(
+    (serial: string): void => {
+      setActiveSerial(serial)
+      const exists = sessions.some((s) => s.serial === serial && s.status !== 'error')
+      if (!exists) void startSession(serial)
+    },
+    [sessions, startSession]
+  )
+
   const handleStop = useCallback(async (): Promise<void> => {
     if (activeSession) {
       await stopSession(activeSession.sessionId)
@@ -144,6 +154,7 @@ export default function App(): JSX.Element {
       <DeviceSidebar
         activeSessionSerial={activeSerial}
         onStart={handleStart}
+        onSelect={handleSelect}
         onOpenConnect={() => setConnectOpen(true)}
         onOpenSettings={() => setPanel('settings')}
       />
