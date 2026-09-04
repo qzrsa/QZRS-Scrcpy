@@ -83,6 +83,15 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
   return out
 }
 
+function bytesEqual(a: Uint8Array | null, b: Uint8Array | null): boolean {
+  if (a === b) return true
+  if (!a || !b || a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 export type RenderSink = (frame: VideoFrame) => void
 
 /** Hardware-acceleration strategy for the WebCodecs decoder. */
@@ -119,7 +128,15 @@ export class H264Player {
     if (this.disposed) return
 
     if (isConfig) {
+      const prevSps = this.sps
+      const prevPps = this.pps
       this.extractSpsPps(data)
+      // 设备旋转（竖屏↔横屏）会让设备端重建编码器并下发新的 SPS/PPS（分辨率变了）。
+      // 已配置的解码器仍按旧分辨率工作，直接喂新尺寸帧会输出 corrupt frame（绿/白/黑）。
+      // 检测到 SPS/PPS 变化时重建解码器，让 WebCodecs 按新分辨率重新 configure。
+      if (this.configured && (!bytesEqual(prevSps, this.sps) || !bytesEqual(prevPps, this.pps))) {
+        this.resetDecoder()
+      }
       if (!this.configured) void this.configureDecoder()
       return
     }
@@ -265,6 +282,22 @@ export class H264Player {
     this.ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height)
     this.ctx?.drawImage(frame, 0, 0)
     frame.close()
+  }
+
+  /** 关闭旧解码器并清空待解码缓冲，用于设备旋转导致分辨率/SPS 变化时重建解码器。 */
+  private resetDecoder(): void {
+    if (this.decoder && this.decoder.state !== 'closed') {
+      try {
+        this.decoder.close()
+      } catch {
+        /* ignore */
+      }
+    }
+    this.decoder = null
+    this.configured = false
+    // 旧分辨率下缓冲的帧已无意义（尺寸不匹配），丢弃；后续新关键帧会在 configure
+    // 完成后经 pendingFrames 重新缓冲。
+    this.pendingFrames = []
   }
 
   dispose(): void {
