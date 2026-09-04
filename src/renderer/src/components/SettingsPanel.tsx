@@ -7,9 +7,31 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
   const { settings, updateSettings } = useApp()
   const [draft, setDraft] = useState<AppSettings>(settings)
   const [resolved, setResolved] = useState<{ adbPath: string; serverPath: string; scrcpyPath: string } | null>(null)
+  const [hevc, setHevc] = useState<'checking' | 'yes' | 'no'>('checking')
 
   useEffect(() => {
     void window.api.resolvePaths().then(setResolved)
+  }, [])
+
+  // 检测内核是否支持 HEVC(H.265) 硬解（依赖主进程开启的 PlatformHEVCDecoderSupport）。
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const r = await VideoDecoder.isConfigSupported({
+          codec: 'hvc1.1.6.L120.B0',
+          codedWidth: 1920,
+          codedHeight: 1080,
+          hardwareAcceleration: 'prefer-hardware'
+        })
+        if (alive) setHevc(r.supported ? 'yes' : 'no')
+      } catch {
+        if (alive) setHevc('no')
+      }
+    })()
+    return () => {
+      alive = false
+    }
   }, [])
 
   const patch = (p: Partial<AppSettings>): void => setDraft((d) => ({ ...d, ...p }))
@@ -76,6 +98,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
           {draft.session.codec === 'h264'
             ? '内置 WebCodecs 渲染仅支持 H.264'
             : '内置渲染不支持该编码（Electron 内核无 HEVC 解码器）。请改用设备卡片的 ⚙️ 独立窗口，或工具栏「嵌入 Scrcpy」'}
+        </div>
+        <div className="hint">
+          HEVC 硬解内核检测：{hevc === 'checking' ? '检测中…' : hevc === 'yes' ? '✅ 支持（内核已启用）' : '❌ 不支持（驱动/硬件受限）'}
         </div>
       </div>
 

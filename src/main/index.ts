@@ -3,6 +3,11 @@ import { join } from 'node:path'
 import { registerIpc, type AppManager } from './ipc'
 import { Store } from './stores'
 
+// 启用 HEVC(H.265) 硬件解码：Electron ≥ v20 官方二进制已内置 HEVC 硬解代码，
+// 因 HEVC 专利默认运行时关闭，这里显式开启 PlatformHEVCDecoderSupport 即可启用硬解。
+// （软件 HEVC 解码需重新编译 ffmpeg，不在本方案内；须在 app ready 前设置。）
+app.commandLine.appendSwitch('enable-features', 'PlatformHEVCDecoderSupport')
+
 let mainWindow: BrowserWindow | null = null
 let manager: AppManager | null = null
 
