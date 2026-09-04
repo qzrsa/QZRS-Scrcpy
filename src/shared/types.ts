@@ -56,6 +56,17 @@ export interface FrameEvent {
   isConfig: boolean
 }
 
+/** Per-session realtime video/network statistics (sampled ~1s). */
+export interface SessionStats {
+  sessionId: string
+  /** video stream bitrate in bits/s */
+  bitrate: number
+  /** device-side capture (encoder output) frame rate in fps */
+  captureFps: number
+  /** client-side received frame rate in fps */
+  recvFps: number
+}
+
 export type SessionStateEvent =
   | { sessionId: string; state: 'started'; serial: string; deviceName: string; width: number; height: number }
   | { sessionId: string; state: 'stopped'; serial: string }

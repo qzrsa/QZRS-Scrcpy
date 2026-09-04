@@ -22,7 +22,8 @@ import type {
   KeymapConfig,
   FrameEvent,
   StreamMeta,
-  SessionStateEvent
+  SessionStateEvent,
+  SessionStats
 } from '@shared/types'
 
 export interface AppManager {
@@ -45,6 +46,8 @@ export function registerIpc(store: Store): AppManager {
   let serverPath = ''
   let lastDevicesJson = ''
   let pollTimer: NodeJS.Timeout | null = null
+  let statsTimer: NodeJS.Timeout | null = null
+  const statsPrev = new Map<string, { bytes: number; time: number }>()
 
   function ensureAdb(): AdbClient {
     if (adb) return adb
@@ -99,6 +102,45 @@ export function registerIpc(store: Store): AppManager {
       clearInterval(pollTimer)
       pollTimer = null
     }
+  }
+
+  // ---- realtime stats sampling ----
+  function startStatsPolling(): void {
+    if (statsTimer) return
+    statsTimer = setInterval(() => {
+      for (const [sid, h] of sessions) {
+        const s = h.session.getStats()
+        const prev = statsPrev.get(sid)
+        const now = Date.now()
+        const dt = prev ? Math.max(0.001, (now - prev.time) / 1000) : 1
+        const bitrate = prev ? Math.max(0, ((s.bytes - prev.bytes) * 8) / dt) : 0
+        const recvFps = Math.max(0, s.frames / dt)
+        // 采集帧率用设备端 pts 跨度估算（(帧数-1) / pts跨度）
+        let captureFps = 0
+        if (s.ptsEnd > s.ptsStart && s.frames > 1) {
+          captureFps = ((s.frames - 1) * 1e6) / (s.ptsEnd - s.ptsStart)
+        }
+        send('session:stats', {
+          sessionId: sid,
+          bitrate: Math.round(bitrate),
+          recvFps,
+          captureFps
+        } satisfies SessionStats)
+        statsPrev.set(sid, { bytes: s.bytes, time: now })
+        h.session.resetStats()
+      }
+      for (const sid of statsPrev.keys()) {
+        if (!sessions.has(sid)) statsPrev.delete(sid)
+      }
+    }, 1000)
+  }
+
+  function stopStatsPolling(): void {
+    if (statsTimer) {
+      clearInterval(statsTimer)
+      statsTimer = null
+    }
+    statsPrev.clear()
   }
 
   // ---- session management ----
@@ -428,11 +470,13 @@ export function registerIpc(store: Store): AppManager {
   })
 
   startPolling()
+  startStatsPolling()
   log('应用已启动')
 
   return {
     async dispose() {
       stopPolling()
+      stopStatsPolling()
       for (const h of sessions.values()) {
         await h.session.stop()
       }

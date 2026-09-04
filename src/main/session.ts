@@ -45,6 +45,12 @@ export class ScrcpySession {
   private codec = 'h264'
   private videoSize = { width: 0, height: 0 }
 
+  // 实时统计：字节数（累计，采样算网速），帧数/pts（窗口值，采样后 reset 算帧率）
+  private bytesReceived = 0
+  private statFrames = 0
+  private statPtsStart = 0
+  private statPtsEnd = 0
+
   constructor(
     sessionId: string,
     adb: AdbClient,
@@ -241,6 +247,7 @@ export class ScrcpySession {
   private handleVideoData(chunk: Buffer | string): void {
     if (this.disposed) return
     const buf: Buffer = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : chunk
+    this.bytesReceived += buf.length
     this.buffer = this.buffer.length === 0 ? buf : Buffer.concat([this.buffer, buf])
     this.processBuffer()
   }
@@ -313,7 +320,7 @@ export class ScrcpySession {
         }
         const data = buf.subarray(offset, offset + size)
         offset += size
-        this.cbs.onFrame(this.sessionId, new Uint8Array(data), pts, isKey, isConfig)
+        this.emitFrame(new Uint8Array(data), pts, isKey, isConfig)
         continue
       }
 
@@ -326,13 +333,23 @@ export class ScrcpySession {
         if (buf.length - offset < p.size) break
         const data = buf.subarray(offset, offset + p.size)
         offset += p.size
-        this.cbs.onFrame(this.sessionId, new Uint8Array(data), p.pts, p.isKey, p.isConfig)
+        this.emitFrame(new Uint8Array(data), p.pts, p.isKey, p.isConfig)
         this.pendingFrame = null
         this.phase = 'frame-header'
         continue
       }
     }
     this.buffer = offset === 0 ? buf : buf.subarray(offset)
+  }
+
+  /** 统一帧出口：累计帧数/pts 用于采样帧率，再转发给上层。 */
+  private emitFrame(data: Uint8Array, pts: number, isKey: boolean, isConfig: boolean): void {
+    if (!isConfig) {
+      if (this.statFrames === 0) this.statPtsStart = pts
+      this.statPtsEnd = pts
+      this.statFrames++
+    }
+    this.cbs.onFrame(this.sessionId, data, pts, isKey, isConfig)
   }
 
   private applyVideoSize(width: number, height: number): void {
@@ -376,6 +393,18 @@ export class ScrcpySession {
     } catch {
       // ignore; disconnect handler cleans up
     }
+  }
+
+  /** 返回当前统计窗口的累计值（bytes 累计不 reset；frames/pts 采样后 reset）。 */
+  getStats(): { bytes: number; frames: number; ptsStart: number; ptsEnd: number } {
+    return { bytes: this.bytesReceived, frames: this.statFrames, ptsStart: this.statPtsStart, ptsEnd: this.statPtsEnd }
+  }
+
+  /** 清空帧统计窗口（每采样周期调用一次）。 */
+  resetStats(): void {
+    this.statFrames = 0
+    this.statPtsStart = 0
+    this.statPtsEnd = 0
   }
 
   async stop(): Promise<void> {

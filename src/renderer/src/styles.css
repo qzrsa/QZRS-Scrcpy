@@ -489,6 +489,38 @@ textarea {
   image-rendering: auto;
 }
 
+/* ===== Realtime stats overlay ===== */
+.stats-overlay {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 10;
+  min-width: 176px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.68);
+  color: #fff;
+  font-family: 'Cascadia Code', Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.8;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.stats-overlay .stats-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.stats-overlay .stats-label {
+  opacity: 0.62;
+}
+
+.stats-overlay .stats-value {
+  font-weight: 600;
+}
+
 /* ===== Empty state ===== */
 .empty-state {
   text-align: center;

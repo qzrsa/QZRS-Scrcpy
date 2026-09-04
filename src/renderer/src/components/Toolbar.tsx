@@ -15,7 +15,8 @@ import {
   IconKeyboard,
   IconTerminal,
   IconSettings,
-  IconLayers
+  IconLayers,
+  IconInfo
 } from './icons'
 import { KEYCODE } from '../keycodes'
 
@@ -25,10 +26,12 @@ interface Props {
   recording: boolean
   fullscreen: boolean
   embedActive: boolean
+  infoActive: boolean
   send: (cmd: ControlCommand) => void
   onToggleGroupControl: () => void
   onToggleFullscreen: () => void
   onToggleEmbed: () => void
+  onToggleInfo: () => void
   onScreenshot: () => void
   onToggleRecord: () => void
   onOpenClipboard: () => void
@@ -118,6 +121,15 @@ export function Toolbar(p: Props): JSX.Element {
         onClick={p.onToggleEmbed}
       >
         <IconRotate width={19} height={19} />
+      </button>
+
+      <button
+        className={`icon-btn ${p.infoActive ? 'start' : ''}`}
+        disabled={disabled}
+        title={p.infoActive ? '关闭实时信息' : '显示实时信息（帧率/网速/解码方式）'}
+        onClick={p.onToggleInfo}
+      >
+        <IconInfo width={19} height={19} />
       </button>
 
       <div className="spacer" />

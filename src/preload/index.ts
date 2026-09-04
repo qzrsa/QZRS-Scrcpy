@@ -8,6 +8,7 @@ import type {
   FrameEvent,
   StreamMeta,
   SessionStateEvent,
+  SessionStats,
   AdbShellResult,
   OpResult
 } from '@shared/types'
@@ -85,6 +86,11 @@ const api = {
     const l = (_e: unknown, d: StreamMeta): void => cb(d)
     ipcRenderer.on('session:meta', l)
     return () => ipcRenderer.removeListener('session:meta', l)
+  },
+  onSessionStats: (cb: (e: SessionStats) => void): (() => void) => {
+    const l = (_e: unknown, d: SessionStats): void => cb(d)
+    ipcRenderer.on('session:stats', l)
+    return () => ipcRenderer.removeListener('session:stats', l)
   },
   onLog: (cb: (line: string) => void): (() => void) => {
     const l = (_e: unknown, d: string): void => cb(d)

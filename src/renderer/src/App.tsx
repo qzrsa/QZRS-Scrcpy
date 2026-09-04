@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ControlCommand } from '@shared/types'
+import type { ControlCommand, SessionStats } from '@shared/types'
 import { useApp } from './store'
 import { DeviceSidebar } from './components/DeviceSidebar'
 import { MirrorView } from './components/MirrorView'
@@ -10,6 +10,7 @@ import { ConnectDialog } from './components/ConnectDialog'
 import { KeymapPanel } from './components/KeymapPanel'
 import { ToolsPanel } from './components/ToolsPanel'
 import { ClipboardDialog } from './components/ClipboardDialog'
+import { StatsOverlay } from './components/StatsOverlay'
 import { IconPhone, IconFullscreen } from './components/icons'
 
 type Panel = 'settings' | 'keymap' | 'tools'
@@ -20,7 +21,7 @@ interface Toast {
 }
 
 export default function App(): JSX.Element {
-  const { sessions, settings, startSession, stopSession, updateSettings } = useApp()
+  const { devices, sessions, settings, startSession, stopSession, updateSettings } = useApp()
   const [activeSerial, setActiveSerial] = useState<string | null>(null)
   const [embedSerial, setEmbedSerial] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
@@ -30,8 +31,12 @@ export default function App(): JSX.Element {
   const [recording, setRecording] = useState(false)
   const [screenshot, setScreenshot] = useState<string | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
+  const [statsOpen, setStatsOpen] = useState(false)
+  const [netStats, setNetStats] = useState<SessionStats | null>(null)
+  const [renderStats, setRenderStats] = useState<{ renderFps: number; hardware: boolean } | null>(null)
 
   const activeSession = sessions.find((s) => s.serial === activeSerial) ?? null
+  const activeTransport = devices.find((d) => d.serial === activeSession?.serial)?.transport ?? null
 
   const showToast = useCallback((msg: string, type: Toast['type'] = 'info') => setToast({ msg, type }), [])
 
@@ -64,6 +69,14 @@ export default function App(): JSX.Element {
     return off
   }, [showToast])
 
+  // realtime network stats from main process (bitrate / fps)
+  useEffect(() => {
+    const off = window.api.onSessionStats((e) => {
+      if (e.sessionId === activeSession?.sessionId) setNetStats(e)
+    })
+    return off
+  }, [activeSession?.sessionId])
+
   // ESC exits fullscreen
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -72,6 +85,9 @@ export default function App(): JSX.Element {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  const handleRenderStats = useCallback((s: { renderFps: number; hardware: boolean }) => setRenderStats(s), [])
+  const toggleInfo = useCallback(() => setStatsOpen((v) => !v), [])
 
   const handleStart = useCallback(
     (serial: string): void => {
@@ -100,6 +116,8 @@ export default function App(): JSX.Element {
       setActiveSerial(null)
       setEmbedSerial(null)
       setRecording(false)
+      setNetStats(null)
+      setRenderStats(null)
     }
   }, [activeSession, stopSession])
 
@@ -179,10 +197,12 @@ export default function App(): JSX.Element {
           recording={recording}
           fullscreen={fullscreen}
           embedActive={embedSerial === activeSession?.serial}
+          infoActive={statsOpen}
           send={send}
           onToggleGroupControl={toggleGroupControl}
           onToggleFullscreen={() => setFullscreen((f) => !f)}
           onToggleEmbed={toggleEmbed}
+          onToggleInfo={toggleInfo}
           onScreenshot={() => void handleScreenshot()}
           onToggleRecord={() => void handleToggleRecord()}
           onOpenClipboard={() => setClipboardOpen(true)}
@@ -197,7 +217,7 @@ export default function App(): JSX.Element {
             embedSerial === activeSession.serial ? (
               <EmbeddedScrcpy serial={activeSession.serial} onError={(m) => showToast(m, 'error')} />
             ) : (
-              <MirrorView session={activeSession} send={send} onError={(m) => showToast(m, 'error')} onFullscreen={() => setFullscreen((f) => !f)} decoderAcceleration={settings.decoderAcceleration} />
+              <MirrorView session={activeSession} send={send} onError={(m) => showToast(m, 'error')} onFullscreen={() => setFullscreen((f) => !f)} decoderAcceleration={settings.decoderAcceleration} onStats={handleRenderStats} />
             )
           ) : (
             <div className="empty-state">
@@ -207,6 +227,10 @@ export default function App(): JSX.Element {
               <h2>开始远程控制你的手机</h2>
               <p>在左侧选择一台已连接的设备并点击开始，即可投屏并实时操控；支持无线连接、群控、按键映射、录屏、文件传输。</p>
             </div>
+          )}
+
+          {activeSession && statsOpen && (
+            <StatsOverlay session={activeSession} transport={activeTransport} net={netStats} render={renderStats} />
           )}
         </div>
       </main>

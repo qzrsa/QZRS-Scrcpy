@@ -283,8 +283,12 @@ export class H264Player {
   private lastTimestamp = 0
   private disposed = false
   private acceleration: DecoderAcceleration
+  private renderFrames = 0
+  private hardware = false
+  private statsTimer: number | null = null
 
   onSink?: RenderSink
+  onStats?: (s: { renderFps: number; hardware: boolean }) => void
 
   constructor(canvas: HTMLCanvasElement, opts?: { acceleration?: DecoderAcceleration }) {
     this.canvas = canvas
@@ -410,11 +414,12 @@ export class H264Player {
 
       if (this.disposed) return
 
-      if (!supported) {
+      if (!supported.supported) {
         this.onError?.(`当前系统无法解码 ${label} 视频流`)
         return
       }
 
+      this.hardware = supported.hardware
       this.decoder?.close()
       this.decoder = new VideoDecoder({
         output: (frame) => this.render(frame),
@@ -422,6 +427,8 @@ export class H264Player {
       })
       this.decoder.configure(config)
       this.configured = true
+
+      this.startStats()
 
       // flush buffered frames now that the decoder is ready (preserves the first keyframe)
       const queued = this.pendingFrames
@@ -440,7 +447,7 @@ export class H264Player {
    *  - hardware：优先硬件解码（性能最好），失败则回退软件避免完全黑屏。
    *  - auto（默认）：no-preference 让 Chromium 自适应，失败再软件兜底。
    */
-  private async checkSupport(config: VideoDecoderConfig): Promise<boolean> {
+  private async checkSupport(config: VideoDecoderConfig): Promise<{ supported: boolean; hardware: boolean }> {
     const check = async (hw: 'no-preference' | 'prefer-hardware' | 'prefer-software'): Promise<VideoDecoderSupport | null> => {
       try {
         return await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: hw })
@@ -459,7 +466,20 @@ export class H264Player {
       supports = await check('no-preference')
       if (!supports?.supported) supports = await check('prefer-software')
     }
-    return supports?.supported ?? false
+    const supported = supports?.supported ?? false
+    const actualHw = supports?.config?.hardwareAcceleration ?? ''
+    const hardware = actualHw === 'prefer-hardware' || (actualHw === '' && this.acceleration === 'hardware')
+    return { supported, hardware }
+  }
+
+  /** 每秒上报渲染帧率 + 解码方式。 */
+  private startStats(): void {
+    if (this.statsTimer) return
+    this.statsTimer = window.setInterval(() => {
+      const fps = this.renderFrames
+      this.renderFrames = 0
+      this.onStats?.({ renderFps: fps, hardware: this.hardware })
+    }, 1000)
   }
 
   onError?: (message: string) => void
@@ -480,6 +500,7 @@ export class H264Player {
     // frame 时，残留区会显示 GPU 默认色 = 绿色，导致"大面积纯绿 + 顶部少量内容"）。
     this.ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height)
     this.ctx?.drawImage(frame, 0, 0)
+    this.renderFrames++
     frame.close()
   }
 
@@ -501,6 +522,10 @@ export class H264Player {
 
   dispose(): void {
     this.disposed = true
+    if (this.statsTimer) {
+      clearInterval(this.statsTimer)
+      this.statsTimer = null
+    }
     if (this.decoder && this.decoder.state !== 'closed') {
       try {
         this.decoder.close()

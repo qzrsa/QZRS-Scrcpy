@@ -11,13 +11,14 @@ interface Props {
   onError: (message: string) => void
   onFullscreen: () => void
   decoderAcceleration: DecoderAcceleration
+  onStats?: (s: { renderFps: number; hardware: boolean }) => void
 }
 
 /**
  * Renders the scrcpy video stream and maps local input (mouse / touch / wheel /
  * keyboard) to scrcpy control messages.
  */
-export function MirrorView({ session, send, onError, onFullscreen, decoderAcceleration }: Props): JSX.Element {
+export function MirrorView({ session, send, onError, onFullscreen, decoderAcceleration, onStats }: Props): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const playerRef = useRef<H264Player | null>(null)
   const mouseDownRef = useRef(false)
@@ -29,6 +30,7 @@ export function MirrorView({ session, send, onError, onFullscreen, decoderAccele
     if (!canvas) return
     const player = new H264Player(canvas, { acceleration: decoderAcceleration })
     player.onError = (m) => onError(m)
+    player.onStats = onStats
     playerRef.current = player
 
     const offFrame = window.api.onFrame((e) => {

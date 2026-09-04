@@ -199,3 +199,10 @@ export const IconMoon = (p: P): JSX.Element => (
     <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
   </svg>
 )
+export const IconInfo = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8h.01" />
+    <path d="M12 11v5" />
+  </svg>
+)
