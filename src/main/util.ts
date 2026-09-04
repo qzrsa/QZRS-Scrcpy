@@ -3,6 +3,18 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
 
+/**
+ * 资源基准目录：开发模式 = 项目根（app.getAppPath() 即项目目录），
+ * 打包模式 = process.resourcesPath（extraResources 里 adb/scrcpy/scrcpy-server 都打到这里）。
+ *
+ * 关键：打包后 app.getAppPath() 返回的是 resources/app.asar（一个「文件」），
+ * 再 join('adb','adb.exe') 会得到 app.asar/adb/adb.exe 这种不存在的路径。
+ * 所以所有「项目自带资源」的定位都必须走 resBase()。
+ */
+function resBase(): string {
+  return app.isPackaged ? process.resourcesPath : app.getAppPath()
+}
+
 /** Find a free TCP port on localhost. */
 export function findFreePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -44,7 +56,7 @@ export function findAdb(explicit?: string): string | null {
 
   const candidates: string[] = []
   // 项目自带的 adb 目录（根目录 /adb/，优先，打包到其他电脑时一起带上）
-  candidates.push(join(app.getAppPath(), 'adb', adbExe()))
+  candidates.push(join(resBase(), 'adb', adbExe()))
   if (process.env.ANDROID_HOME) {
     candidates.push(join(process.env.ANDROID_HOME, 'platform-tools', adbExe()))
   }
@@ -71,11 +83,13 @@ function adbExe(): string {
 /** Locate the bundled scrcpy-server binary. */
 export function findServer(explicit?: string): string | null {
   if (explicit && existsSync(explicit)) return explicit
-  const bundled = join(app.getAppPath(), 'resources', 'scrcpy-server')
-  if (existsSync(bundled)) return bundled
-  // dev mode fallback: relative to project root
-  const dev = join(app.getAppPath(), '..', 'resources', 'scrcpy-server')
-  if (existsSync(dev)) return dev
+  const candidates = [
+    join(resBase(), 'scrcpy-server'),                     // 打包后: resources/scrcpy-server
+    join(app.getAppPath(), 'resources', 'scrcpy-server')  // 开发模式: <root>/resources/scrcpy-server
+  ]
+  for (const c of candidates) {
+    if (c && existsSync(c)) return c
+  }
   return null
 }
 
@@ -90,7 +104,7 @@ export function findScrcpy(explicit?: string): string | null {
   const candidates: string[] = []
   if (process.env.SCRCPY_HOME) candidates.push(join(process.env.SCRCPY_HOME, exe))
   // 项目自带的 scrcpy 目录（根目录 /scrcpy/，优先，打包到其他电脑时一起带上）
-  candidates.push(join(app.getAppPath(), 'scrcpy', exe))
+  candidates.push(join(resBase(), 'scrcpy', exe))
   // PATH lookup
   const pathDirs = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':')
   for (const d of pathDirs) {

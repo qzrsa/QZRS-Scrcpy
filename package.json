@@ -9,7 +9,9 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json"
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "dist": "npm run build && electron-builder --dir",
+    "dist:dir": "electron-builder --dir"
   },
   "dependencies": {
     "koffi": "^3.2.0",
@@ -22,8 +24,31 @@
     "@types/react-dom": "^19.2.7",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.1.1",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"
+  },
+  "build": {
+    "appId": "com.qzrs.scrcpy",
+    "productName": "QZRS Scrcpy",
+    "directories": {
+      "output": "../release"
+    },
+    "files": [
+      "out/**/*"
+    ],
+    "extraResources": [
+      { "from": "adb", "to": "adb" },
+      { "from": "scrcpy", "to": "scrcpy" },
+      { "from": "resources/scrcpy-server", "to": "scrcpy-server" }
+    ],
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "electronDist": "node_modules/electron/dist",
+    "win": {
+      "target": ["dir"]
+    }
   }
 }
