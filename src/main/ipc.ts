@@ -265,7 +265,7 @@ export function registerIpc(store: Store): AppManager {
       // 不要传 --no-control=false（会报 "option doesn't take an argument" 导致秒退）。
       const proc = spawn(
         exe,
-        ['-s', serial, '--window-title', `ScrcpyControl - ${serial}`],
+        ['-s', serial, '--window-title', `QZRS Scrcpy - ${serial}`],
         {
           windowsHide: false,
           stdio: 'ignore',

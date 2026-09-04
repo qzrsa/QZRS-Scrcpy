@@ -3,7 +3,7 @@
 // 原理：scrcpy 是一个独立的 SDL2 顶层窗口，通过 user32.SetParent 把它变成
 // Electron 窗口的子窗口，再用 SetWindowLongW 去掉标题栏/边框（WS_CHILD|WS_VISIBLE），
 // 最后 SetWindowPos 定位到 MirrorView 占位区。这样 scrcpy 的画面就能"嵌入"在
-// ScrcpyControl 的窗口里，跟随主窗口移动/缩放，作为内置 WebCodecs 渲染异常时的回退方案。
+// QZRS Scrcpy 的窗口里，跟随主窗口移动/缩放，作为内置 WebCodecs 渲染异常时的回退方案。
 //
 // 依赖 koffi（N-API FFI，纯 JS 加载 user32.dll，无需 native 编译）。
 
@@ -95,7 +95,7 @@ export async function launchEmbeddedScrcpy(
     return { ok: true, message: '已嵌入' }
   }
 
-  const title = `ScrcpyControl - ${serial}`
+  const title = `QZRS Scrcpy - ${serial}`
 
   try {
     const proc = spawn(

@@ -42,7 +42,7 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
             <IconPhone width={18} height={18} />
           </span>
           <div className="brand-text">
-            <div className="brand-name">Scrcpy Control</div>
+            <div className="brand-name">QZRS Scrcpy</div>
             <div className="brand-sub">手机远程控制</div>
           </div>
         </div>

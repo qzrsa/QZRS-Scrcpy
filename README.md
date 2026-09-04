@@ -1,4 +1,4 @@
-# Scrcpy Control
+# QZRS Scrcpy
 
 一个现代、独立的 PC 端 Android 投屏与控制客户端。基于 Electron + React + TypeScript，**从零独立实现 scrcpy 4.1 协议**UI 经过重新设计，支持多设备群控、键鼠操作、截屏录屏、剪贴板同步、按键映射、文件传输与 ADB 终端。
 
