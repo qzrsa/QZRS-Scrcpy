@@ -99,8 +99,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
             ? '内置 WebCodecs 渲染仅支持 H.264'
             : '内置渲染不支持该编码（Electron 内核无 HEVC 解码器）。请改用设备卡片的 ⚙️ 独立窗口，或工具栏「嵌入 Scrcpy」'}
         </div>
-        <div className="hint">
-          HEVC 硬解内核检测：{hevc === 'checking' ? '检测中…' : hevc === 'yes' ? '✅ 支持（内核已启用）' : '❌ 不支持（驱动/硬件受限）'}
+        <div className="hint" style={{ fontWeight: 600 }}>
+          HEVC 硬解内核检测：{' '}
+          <span style={{ color: hevc === 'yes' ? '#2ecc71' : hevc === 'no' ? '#e74c3c' : 'inherit' }}>
+            {hevc === 'checking' ? '检测中…' : hevc === 'yes' ? '✅ 支持（内核已启用）' : '❌ 不支持（驱动/硬件受限）'}
+          </span>
         </div>
       </div>
 
