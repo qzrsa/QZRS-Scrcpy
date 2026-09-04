@@ -219,9 +219,11 @@ export function registerIpc(store: Store): AppManager {
       }
     }
     try {
+      // 注意：scrcpy 的 --no-control 是布尔开关（不接受参数），默认就启用控制，
+      // 不要传 --no-control=false（会报 "option doesn't take an argument" 导致秒退）。
       const proc = spawn(
         exe,
-        ['-s', serial, '--window-title', `ScrcpyControl - ${serial}`, '--no-control=false'],
+        ['-s', serial, '--window-title', `ScrcpyControl - ${serial}`],
         {
           windowsHide: false,
           stdio: 'ignore',
