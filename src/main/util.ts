@@ -38,11 +38,13 @@ export function socketNameFor(scid: number): string {
   return 'scrcpy_' + scid.toString(16).padStart(8, '0')
 }
 
-/** Locate the adb executable. Priority: user setting > env > PATH > common locations. */
+/** Locate the adb executable. Priority: user setting > bundled /adb > env > PATH > common locations. */
 export function findAdb(explicit?: string): string | null {
   if (explicit && existsSync(explicit)) return explicit
 
   const candidates: string[] = []
+  // 项目自带的 adb 目录（根目录 /adb/，优先，打包到其他电脑时一起带上）
+  candidates.push(join(app.getAppPath(), 'adb', adbExe()))
   if (process.env.ANDROID_HOME) {
     candidates.push(join(process.env.ANDROID_HOME, 'platform-tools', adbExe()))
   }
