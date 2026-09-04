@@ -87,6 +87,8 @@ export function findScrcpy(explicit?: string): string | null {
   const exe = process.platform === 'win32' ? 'scrcpy.exe' : 'scrcpy'
   const candidates: string[] = []
   if (process.env.SCRCPY_HOME) candidates.push(join(process.env.SCRCPY_HOME, exe))
+  // 项目自带的 scrcpy 目录（根目录 /scrcpy/，优先，打包到其他电脑时一起带上）
+  candidates.push(join(app.getAppPath(), 'scrcpy', exe))
   // PATH lookup
   const pathDirs = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':')
   for (const d of pathDirs) {

@@ -1,6 +1,6 @@
 import { ipcMain, dialog, clipboard, app, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
 import { writeFileSync, copyFileSync } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, basename, dirname } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { AdbClient } from './adb'
 import { ScrcpySession } from './session'
@@ -225,7 +225,8 @@ export function registerIpc(store: Store): AppManager {
         {
           windowsHide: false,
           stdio: 'ignore',
-          detached: false
+          detached: false,
+          cwd: dirname(exe)
         }
       )
       externalScrcpys.set(serial, proc)

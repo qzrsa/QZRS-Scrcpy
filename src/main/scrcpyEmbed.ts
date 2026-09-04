@@ -8,6 +8,7 @@
 // 依赖 koffi（N-API FFI，纯 JS 加载 user32.dll，无需 native 编译）。
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { dirname } from 'node:path'
 
 // ---- Win32 常量 ----
 const GWL_STYLE = -16
@@ -100,7 +101,7 @@ export async function launchEmbeddedScrcpy(
     const proc = spawn(
       exePath,
       ['-s', serial, '--window-title', title, '--window-borderless'],
-      { windowsHide: false, stdio: 'ignore' }
+      { windowsHide: false, stdio: 'ignore', cwd: dirname(exePath) }
     )
 
     const handle: EmbedHandle = { proc, hwnd: null, title }
