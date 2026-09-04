@@ -3,6 +3,7 @@ import type { ControlCommand } from '@shared/types'
 import { useApp } from './store'
 import { DeviceSidebar } from './components/DeviceSidebar'
 import { MirrorView } from './components/MirrorView'
+import { EmbeddedScrcpy } from './components/EmbeddedScrcpy'
 import { Toolbar } from './components/Toolbar'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ConnectDialog } from './components/ConnectDialog'
@@ -21,6 +22,7 @@ interface Toast {
 export default function App(): JSX.Element {
   const { sessions, settings, startSession, stopSession, updateSettings } = useApp()
   const [activeSerial, setActiveSerial] = useState<string | null>(null)
+  const [embedSerial, setEmbedSerial] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
   const [connectOpen, setConnectOpen] = useState(false)
   const [clipboardOpen, setClipboardOpen] = useState(false)
@@ -96,9 +98,17 @@ export default function App(): JSX.Element {
     if (activeSession) {
       await stopSession(activeSession.sessionId)
       setActiveSerial(null)
+      setEmbedSerial(null)
       setRecording(false)
     }
   }, [activeSession, stopSession])
+
+  // 切换"嵌入 scrcpy"回退模式：内置 WebCodecs 渲染异常（绿屏/竖屏裁切）时，
+  // 用官方 scrcpy.exe 的 SDL 窗口嵌入到 MirrorView 区域看画面。
+  const toggleEmbed = useCallback((): void => {
+    if (!activeSession) return
+    setEmbedSerial((prev) => (prev === activeSession.serial ? null : activeSession.serial))
+  }, [activeSession])
 
   const send = useCallback(
     (cmd: ControlCommand): void => {
@@ -168,9 +178,11 @@ export default function App(): JSX.Element {
           groupControl={settings.groupControl}
           recording={recording}
           fullscreen={fullscreen}
+          embedActive={embedSerial === activeSession?.serial}
           send={send}
           onToggleGroupControl={toggleGroupControl}
           onToggleFullscreen={() => setFullscreen((f) => !f)}
+          onToggleEmbed={toggleEmbed}
           onScreenshot={() => void handleScreenshot()}
           onToggleRecord={() => void handleToggleRecord()}
           onOpenClipboard={() => setClipboardOpen(true)}
@@ -182,7 +194,11 @@ export default function App(): JSX.Element {
 
         <div className="stage">
           {activeSession ? (
-            <MirrorView session={activeSession} send={send} onError={(m) => showToast(m, 'error')} onFullscreen={() => setFullscreen((f) => !f)} />
+            embedSerial === activeSession.serial ? (
+              <EmbeddedScrcpy serial={activeSession.serial} onError={(m) => showToast(m, 'error')} />
+            ) : (
+              <MirrorView session={activeSession} send={send} onError={(m) => showToast(m, 'error')} onFullscreen={() => setFullscreen((f) => !f)} />
+            )
           ) : (
             <div className="empty-state">
               <div className="big-phone">

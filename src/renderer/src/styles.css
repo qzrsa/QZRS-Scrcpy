@@ -462,6 +462,16 @@ textarea {
   max-height: 100%;
 }
 
+/* 嵌入 scrcpy 原生窗口的占位容器：透明，真正的画面是 SetParent 到主窗口的 scrcpy 子窗口 */
+.embed-host {
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  background: #000;
+}
+
 .mirror-canvas {
   display: block;
   max-width: 100%;
