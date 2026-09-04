@@ -13,6 +13,9 @@ export interface DeviceInfo {
 
 export type VideoCodec = 'h264' | 'h265' | 'av1'
 
+/** PC-side WebCodecs decoder hardware-acceleration strategy. */
+export type DecoderAcceleration = 'auto' | 'hardware' | 'software'
+
 export interface SessionOptions {
   /** video bit rate in bits/s, 0 = default (8 Mbps) */
   bitRate: number
@@ -22,6 +25,8 @@ export interface SessionOptions {
   maxSize: number
   /** video codec */
   codec: VideoCodec
+  /** explicit device-side MediaCodec encoder name; empty = auto select */
+  videoEncoder: string
   /** enable control */
   control: boolean
   /** keep device screen awake */
@@ -99,6 +104,8 @@ export interface AppSettings {
   /** Path to official scrcpy.exe (fallback renderer when built-in WebCodecs glitches) */
   scrcpyPath: string
   theme: 'dark' | 'light' | 'system'
+  /** PC-side WebCodecs decoder acceleration strategy */
+  decoderAcceleration: DecoderAcceleration
   /** default session options */
   session: Omit<SessionOptions, 'audio'>
   /** whether to enable group control (broadcast input to all sessions) */

@@ -85,6 +85,9 @@ function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
 
 export type RenderSink = (frame: VideoFrame) => void
 
+/** Hardware-acceleration strategy for the WebCodecs decoder. */
+export type DecoderAcceleration = 'auto' | 'hardware' | 'software'
+
 /**
  * Decodes a raw scrcpy H.264 stream (config packets + media packets, Annex B)
  * and renders to a canvas. Implements the same config/frame merge the scrcpy
@@ -102,12 +105,14 @@ export class H264Player {
   private pps: Uint8Array | null = null
   private lastTimestamp = 0
   private disposed = false
+  private acceleration: DecoderAcceleration
 
   onSink?: RenderSink
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, opts?: { acceleration?: DecoderAcceleration }) {
     this.canvas = canvas
     this.ctx = canvas.getContext('2d')
+    this.acceleration = opts?.acceleration ?? 'auto'
   }
 
   feed(data: Uint8Array, isConfig: boolean, isKey: boolean): void {
@@ -193,23 +198,28 @@ export class H264Player {
         optimizeForLatency: true
       }
 
+      // 三档硬件加速策略（用户可在设置里选择）：
+      //  - software：强制软件解码。规避 AMD Radeon 等驱动不稳的 GPU 上硬件 H.264 解码
+      //    输出 corrupt frame 导致的"绿屏"（本机 AMD RX 9070 GRE 复现）。
+      //  - hardware：优先硬件解码（性能最好），失败则回退软件避免完全黑屏。
+      //  - auto（默认）：no-preference 让 Chromium 自适应，失败再软件兜底。
       let supports: VideoDecoderSupport | null = null
-      // 优先 no-preference：让 Chromium 根据当前 GPU 驱动自适应。AMD Radeon 等
-      // 驱动不稳的 GPU 上会自动回退到软件 H.264 解码，避免硬件路径输出 corrupt frame
-      // 导致"绿屏"（症状：canvas 显示纯绿 + 顶部少量像素残留，本机 AMD RX 9070 GRE 复现）。
-      try {
-        supports = await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: 'no-preference' })
-      } catch {
-        supports = null
+      const check = async (hw: 'no-preference' | 'prefer-hardware' | 'prefer-software'): Promise<VideoDecoderSupport | null> => {
+        try {
+          return await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: hw })
+        } catch {
+          return null
+        }
       }
 
-      if (!supports || !supports.supported) {
-        // 兜底：显式强制软件解码
-        try {
-          supports = await VideoDecoder.isConfigSupported({ ...config, hardwareAcceleration: 'prefer-software' })
-        } catch {
-          supports = null
-        }
+      if (this.acceleration === 'software') {
+        supports = await check('prefer-software')
+      } else if (this.acceleration === 'hardware') {
+        supports = await check('prefer-hardware')
+        if (!supports?.supported) supports = await check('prefer-software')
+      } else {
+        supports = await check('no-preference')
+        if (!supports?.supported) supports = await check('prefer-software')
       }
 
       if (this.disposed) return

@@ -197,7 +197,7 @@ export default function App(): JSX.Element {
             embedSerial === activeSession.serial ? (
               <EmbeddedScrcpy serial={activeSession.serial} onError={(m) => showToast(m, 'error')} />
             ) : (
-              <MirrorView session={activeSession} send={send} onError={(m) => showToast(m, 'error')} onFullscreen={() => setFullscreen((f) => !f)} />
+              <MirrorView session={activeSession} send={send} onError={(m) => showToast(m, 'error')} onFullscreen={() => setFullscreen((f) => !f)} decoderAcceleration={settings.decoderAcceleration} />
             )
           ) : (
             <div className="empty-state">

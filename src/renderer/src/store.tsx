@@ -149,6 +149,7 @@ function defaultSession(): SessionOptions {
     maxFps: 0,
     maxSize: 1920,
     codec: 'h264',
+    videoEncoder: '',
     control: true,
     stayAwake: true,
     showTouches: false,

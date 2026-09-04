@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import type { ControlCommand } from '@shared/types'
 import { H264Player } from '../decoder/h264'
+import type { DecoderAcceleration } from '../decoder/h264'
 import { KEYCODE, META, BUTTON, keycodeFromEventCode } from '../keycodes'
 import type { SessionInfo } from '../store'
 
@@ -9,13 +10,14 @@ interface Props {
   send: (cmd: ControlCommand) => void
   onError: (message: string) => void
   onFullscreen: () => void
+  decoderAcceleration: DecoderAcceleration
 }
 
 /**
  * Renders the scrcpy video stream and maps local input (mouse / touch / wheel /
  * keyboard) to scrcpy control messages.
  */
-export function MirrorView({ session, send, onError, onFullscreen }: Props): JSX.Element {
+export function MirrorView({ session, send, onError, onFullscreen, decoderAcceleration }: Props): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const playerRef = useRef<H264Player | null>(null)
   const mouseDownRef = useRef(false)
@@ -25,7 +27,7 @@ export function MirrorView({ session, send, onError, onFullscreen }: Props): JSX
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const player = new H264Player(canvas)
+    const player = new H264Player(canvas, { acceleration: decoderAcceleration })
     player.onError = (m) => onError(m)
     playerRef.current = player
 

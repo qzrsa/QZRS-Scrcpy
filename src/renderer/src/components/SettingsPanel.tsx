@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AppSettings, VideoCodec } from '@shared/types'
+import type { AppSettings, VideoCodec, DecoderAcceleration } from '@shared/types'
 import { useApp } from '../store'
 import { Drawer } from './Drawer'
 
@@ -72,6 +72,31 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
           <option value="h265">H.265 / HEVC</option>
           <option value="av1">AV1</option>
         </select>
+      </div>
+
+      <div className="field">
+        <label>编码器名称（可选）</label>
+        <input
+          className="text-input"
+          value={draft.session.videoEncoder}
+          placeholder="留空自动选择（如 c2.android.avc.encoder）"
+          onChange={(e) => patchSession({ videoEncoder: e.target.value })}
+        />
+        <div className="hint">指定设备端 MediaCodec 编码器，留空由 scrcpy 自动选择。常用：c2.android.avc.encoder（软件）、c2.qti.avc.encoder（高通硬编）</div>
+      </div>
+
+      <div className="field">
+        <label>解码器（硬件加速）</label>
+        <select
+          className="select"
+          value={draft.decoderAcceleration}
+          onChange={(e) => patch({ decoderAcceleration: e.target.value as DecoderAcceleration })}
+        >
+          <option value="auto">自动（推荐）</option>
+          <option value="hardware">优先硬件</option>
+          <option value="software">强制软件（绿屏时选这个）</option>
+        </select>
+        <div className="hint">PC 端解码策略。遇到绿屏/花屏（AMD 等驱动不稳）时选"强制软件"</div>
       </div>
 
       <div className="field">

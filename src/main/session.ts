@@ -137,6 +137,7 @@ export class ScrcpySession {
     if (o.bitRate) args.push(`video_bit_rate=${o.bitRate}`)
     if (o.maxFps) args.push(`max_fps=${o.maxFps}`)
     if (o.maxSize) args.push(`max_size=${o.maxSize}`)
+    if (o.videoEncoder) args.push(`video_encoder=${o.videoEncoder}`)
     if (!o.control) args.push('control=false')
     if (o.stayAwake) args.push('stay_awake=true')
     if (o.showTouches) args.push('show_touches=true')
