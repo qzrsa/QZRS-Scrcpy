@@ -48,7 +48,8 @@
     ],
     "electronDist": "node_modules/electron/dist",
     "win": {
-      "target": ["dir"]
+      "target": ["dir"],
+      "icon": "resources/icon.ico"
     }
   }
 }

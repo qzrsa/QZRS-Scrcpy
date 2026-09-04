@@ -1,18 +1,30 @@
 import { createServer } from 'node:net'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { app } from 'electron'
 
 /**
- * 资源基准目录：开发模式 = 项目根（app.getAppPath() 即项目目录），
- * 打包模式 = process.resourcesPath（extraResources 里 adb/scrcpy/scrcpy-server 都打到这里）。
+ * 「项目自带资源」的候选根目录列表。
  *
- * 关键：打包后 app.getAppPath() 返回的是 resources/app.asar（一个「文件」），
- * 再 join('adb','adb.exe') 会得到 app.asar/adb/adb.exe 这种不存在的路径。
- * 所以所有「项目自带资源」的定位都必须走 resBase()。
+ * 不依赖 `app.isPackaged`（它在某些 electron-builder 配置下不可靠，
+ * 曾导致 scrcpy-server 在便携版里找不到）。直接把所有可能的位置都试一遍，
+ * 找到一个就返回。
+ *
+ * 各场景：
+ * - 打包后（electron-builder extraResources 把 adb/scrcpy/scrcpy-server 打到 resources/）：
+ *     1. process.resourcesPath             → .../resources/
+ *     2. dirname(app.getAppPath())         → dirname('.../resources/app.asar') = .../resources/
+ * - 开发模式（electron-vite，app.getAppPath() = 项目根 ScrcpyControl）：
+ *     3. app.getAppPath()                  → ScrcpyControl/（项目自带 adb/scrcpy/ 在这）
+ *     4. app.getAppPath()/resources        → ScrcpyControl/resources/（项目自带 scrcpy-server 在这）
  */
-function resBase(): string {
-  return app.isPackaged ? process.resourcesPath : app.getAppPath()
+function resBases(): string[] {
+  return [
+    process.resourcesPath,
+    dirname(app.getAppPath()),
+    app.getAppPath(),
+    join(app.getAppPath(), 'resources')
+  ]
 }
 
 /** Find a free TCP port on localhost. */
@@ -50,13 +62,17 @@ export function socketNameFor(scid: number): string {
   return 'scrcpy_' + scid.toString(16).padStart(8, '0')
 }
 
-/** Locate the adb executable. Priority: user setting > bundled /adb > env > PATH > common locations. */
+function adbExe(): string {
+  return process.platform === 'win32' ? 'adb.exe' : 'adb'
+}
+
+/** Locate the adb executable. Priority: user setting > bundled /adb > env > common locations. */
 export function findAdb(explicit?: string): string | null {
   if (explicit && existsSync(explicit)) return explicit
 
   const candidates: string[] = []
-  // 项目自带的 adb 目录（根目录 /adb/，优先，打包到其他电脑时一起带上）
-  candidates.push(join(resBase(), 'adb', adbExe()))
+  // 项目自带的 adb 目录（多个基准都试一遍，不依赖 isPackaged）
+  for (const base of resBases()) candidates.push(join(base, 'adb', adbExe()))
   if (process.env.ANDROID_HOME) {
     candidates.push(join(process.env.ANDROID_HOME, 'platform-tools', adbExe()))
   }
@@ -76,17 +92,11 @@ export function findAdb(explicit?: string): string | null {
   return null
 }
 
-function adbExe(): string {
-  return process.platform === 'win32' ? 'adb.exe' : 'adb'
-}
-
 /** Locate the bundled scrcpy-server binary. */
 export function findServer(explicit?: string): string | null {
   if (explicit && existsSync(explicit)) return explicit
-  const candidates = [
-    join(resBase(), 'scrcpy-server'),                     // 打包后: resources/scrcpy-server
-    join(app.getAppPath(), 'resources', 'scrcpy-server')  // 开发模式: <root>/resources/scrcpy-server
-  ]
+  // 多个基准都试一遍，不依赖 isPackaged（曾因 isPackaged=false 找不到）
+  const candidates = resBases().map(b => join(b, 'scrcpy-server'))
   for (const c of candidates) {
     if (c && existsSync(c)) return c
   }
@@ -103,8 +113,8 @@ export function findScrcpy(explicit?: string): string | null {
   const exe = process.platform === 'win32' ? 'scrcpy.exe' : 'scrcpy'
   const candidates: string[] = []
   if (process.env.SCRCPY_HOME) candidates.push(join(process.env.SCRCPY_HOME, exe))
-  // 项目自带的 scrcpy 目录（根目录 /scrcpy/，优先，打包到其他电脑时一起带上）
-  candidates.push(join(resBase(), 'scrcpy', exe))
+  // 项目自带的 scrcpy 目录（多个基准都试一遍）
+  for (const base of resBases()) candidates.push(join(base, 'scrcpy', exe))
   // PATH lookup
   const pathDirs = (process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':')
   for (const d of pathDirs) {
