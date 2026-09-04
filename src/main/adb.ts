@@ -51,7 +51,6 @@ export class AdbClient {
       let model: string | null = null
       let device: string | null = null
       let product: string | null = null
-      let transport: string | null = null
       for (let i = 2; i < parts.length; i++) {
         const kv = parts[i]
         const eq = kv.indexOf(':')
@@ -61,17 +60,20 @@ export class AdbClient {
         if (k === 'model') model = v.replace(/_/g, ' ')
         else if (k === 'device') device = v
         else if (k === 'product') product = v
-        else if (k === 'transport_id') transport = v
+        // 注意：transport_id 是 adb 内部数字 ID，不是 usb/tcpip 类型，忽略它
       }
-      // adb -l does not directly expose usb/tcpip; infer from serial format
+      // adb -l 不直接暴露 usb/tcpip，从 serial 格式推断：
+      // 含 IP:port → tcpip（无线 adb）；emulator- 前缀 → local（模拟器）；其余 → usb
       const isTcp = /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+/.test(serial)
+      const isEmulator = /^emulator-/.test(serial)
+      const transport = isTcp ? 'tcpip' : isEmulator ? 'local' : 'usb'
       out.push({
         serial,
         state,
         model,
         device,
         product,
-        transport: transport || (isTcp ? 'tcpip' : 'usb')
+        transport
       })
     }
     return out
