@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import type { ControlCommand, KeymapBinding, KeymapConfig, MotionEventAction } from '@shared/types'
 import { H264Player } from '../decoder/h264'
 import type { DecoderAcceleration } from '../decoder/h264'
@@ -53,6 +53,8 @@ export function MirrorView({
   /** mirror of the active keymap, kept in a ref so the keydown handler always reads the latest */
   const keymapRef = useRef<KeymapConfig | null>(keymap)
   keymapRef.current = keymap
+  /** debug state: last key event + canvas size, surfaced via a small overlay */
+  const [debugInfo, setDebugInfo] = useState<string>('')
 
   // (Re)create the decoder whenever the active session changes.
   useEffect(() => {
@@ -108,6 +110,9 @@ export function MirrorView({
   /** Build a touch command using the canvas (video) coordinate space. */
   const touch = (action: MotionEventAction, x: number, y: number, w: number, h: number, pid: 'mouse' | 'finger' | number, buttons = 0, pressure = 1): void => {
     send({ type: 'touch', action, pointerId: pid, x, y, width: w, height: h, pressure, buttons })
+    // debug surface
+    const actionName = ['DOWN', 'UP', 'MOVE', '...', 'POINTER_UP', 'POINTER_DOWN', 'HOVER_MOVE', 'HOVER_ENTER', 'HOVER_EXIT'][action] ?? String(action)
+    setDebugInfo(`touch ${actionName} (${x.toFixed(0)},${y.toFixed(0)}) pid=${pid} w=${w} h=${h}`)
   }
 
   /** Send an Android keycode event. */
@@ -263,11 +268,18 @@ export function MirrorView({
       const km = keymapRef.current
       if (km) {
         const matches = km.bindings.filter((b) => normalizeKeyCode(b.key) === e.code)
+        const canvas = canvasRef.current
+        const csize = canvas ? `${canvas.width}x${canvas.height}` : 'no-canvas'
         if (matches.length > 0) {
           e.preventDefault()
+          setDebugInfo(`hit ${e.code} → ${matches.length} match(es); canvas=${csize}; first binding action=${matches[0].action} x=${matches[0].x.toFixed(2)} y=${matches[0].y.toFixed(2)}`)
           for (const b of matches) dispatchKeymapDown(b)
           return
+        } else {
+          setDebugInfo(`keydown ${e.code} | keymap=${km.name} (${km.bindings.length} bindings); no match | canvas=${csize}; first binding keys=${km.bindings.slice(0, 3).map((b) => `'${b.key}'→'${normalizeKeyCode(b.key)}'`).join(',')}`)
         }
+      } else {
+        setDebugInfo(`keydown ${e.code} | NO ACTIVE KEYMAP (check KeymapPanel "激活" radio + 保存映射)`)
       }
 
       // No keymap or no matching binding → fall back to raw Android keycode mapping.
@@ -396,6 +408,9 @@ export function MirrorView({
           onChange={onKeymapChange}
           onClose={onEditClose ?? (() => { /* noop */ })}
         />
+      )}
+      {debugInfo && (
+        <div className="mirror-debug-overlay">{debugInfo}</div>
       )}
     </div>
   )

@@ -1219,3 +1219,20 @@ textarea {
   gap: 8px;
   pointer-events: auto;
 }
+
+/* Mirror debug overlay (temporary — shows keymap/canvas/keydown state for diagnosis) */
+.mirror-debug-overlay {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 50;
+  max-width: calc(100% - 24px);
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #ffd166;
+  font: 12px/1.4 ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 209, 102, 0.35);
+  pointer-events: none;
+  word-break: break-all;
+}
