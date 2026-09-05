@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import type { KeymapBinding, KeymapConfig, KeymapOverlay, KeymapAction } from '@shared/types'
+import { normalizeKeyCode } from '../keycodes'
 
 interface Props {
   keymap: KeymapConfig
@@ -356,8 +357,9 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
                 <input
                   type="text"
                   value={b.key}
-                  onChange={(e) => onKeyChange(b, e.target.value)}
-                  title="KeyboardEvent.code"
+                  onChange={(e) => onKeyChange(b, normalizeKeyCode(e.target.value))}
+                  title="KeyboardEvent.code (例如 KeyW / Space / ArrowUp)"
+                  placeholder="KeyW"
                   onMouseDown={(e) => e.stopPropagation()}
                 />
                 <button onClick={(e) => { e.stopPropagation(); removeBinding(b) }}>×</button>

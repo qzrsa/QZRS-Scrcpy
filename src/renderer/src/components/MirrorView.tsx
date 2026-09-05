@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import type { ControlCommand, KeymapBinding, KeymapConfig, MotionEventAction } from '@shared/types'
 import { H264Player } from '../decoder/h264'
 import type { DecoderAcceleration } from '../decoder/h264'
-import { KEYCODE, META, BUTTON, keycodeFromEventCode } from '../keycodes'
+import { KEYCODE, META, BUTTON, keycodeFromEventCode, normalizeKeyCode } from '../keycodes'
 import type { SessionInfo } from '../store'
 import { KeymapEditor } from './KeymapEditor'
 
@@ -48,6 +48,8 @@ export function MirrorView({
   const metaRef = useRef(0)
   /** per-binding runtime state for `hold` / `repeat` / `view` */
   const bindingStateRef = useRef<Map<string, BindingState>>(new Map())
+  /** synthetic pointer id allocator (negative to avoid colliding with mouse/finger) */
+  const nextPointerIdRef = useRef(-1)
   /** mirror of the active keymap, kept in a ref so the keydown handler always reads the latest */
   const keymapRef = useRef<KeymapConfig | null>(keymap)
   keymapRef.current = keymap
@@ -144,8 +146,9 @@ export function MirrorView({
     if (st) return true // already active
 
     const px = normToVideo(binding.x, binding.y)
-    // synthetic pointerId (negative to avoid colliding with mouse/finger)
-    const pid = -(Math.floor(binding.x * 1e6) + Math.floor(binding.y * 1e6)) as unknown as number
+    // 每个 binding 使用独立的 synthetic pointerId；之前按坐标生成会导致 WASD 互相冲突
+    const pid = nextPointerIdRef.current
+    nextPointerIdRef.current -= 1
     const newSt: BindingState = { pointerId: pid, curX: px.x, curY: px.y }
 
     switch (binding.action) {
@@ -259,7 +262,7 @@ export function MirrorView({
 
       const km = keymapRef.current
       if (km) {
-        const matches = km.bindings.filter((b) => b.key === e.code)
+        const matches = km.bindings.filter((b) => normalizeKeyCode(b.key) === e.code)
         if (matches.length > 0) {
           e.preventDefault()
           for (const b of matches) dispatchKeymapDown(b)
@@ -281,7 +284,7 @@ export function MirrorView({
 
       const km = keymapRef.current
       if (km) {
-        const matches = km.bindings.filter((b) => b.key === e.code)
+        const matches = km.bindings.filter((b) => normalizeKeyCode(b.key) === e.code)
         if (matches.length > 0) {
           e.preventDefault()
           for (const b of matches) dispatchKeymapUp(b)

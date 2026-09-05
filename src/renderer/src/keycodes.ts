@@ -194,3 +194,66 @@ export function keycodeFromEventCode(code: string): number | null {
   }
   return map[code] ?? null
 }
+
+/**
+ * 把用户输入的友好键名归一化为 DOM KeyboardEvent.code。
+ * 例如：'w'/'W' -> 'KeyW'，'space' -> 'Space'，'arrowup' -> 'ArrowUp'，'1' -> 'Digit1'。
+ * 已经是标准 code（如 'KeyW'）则原样返回。
+ */
+export function normalizeKeyCode(input: string): string {
+  const raw = input.trim()
+  const lower = raw.toLowerCase()
+
+  const aliases: Record<string, string> = {
+    space: 'Space',
+    ' ': 'Space',
+    spc: 'Space',
+    esc: 'Escape',
+    escape: 'Escape',
+    enter: 'Enter',
+    return: 'Enter',
+    up: 'ArrowUp',
+    down: 'ArrowDown',
+    left: 'ArrowLeft',
+    right: 'ArrowRight',
+    arrowup: 'ArrowUp',
+    arrowdown: 'ArrowDown',
+    arrowleft: 'ArrowLeft',
+    arrowright: 'ArrowRight',
+    pgup: 'PageUp',
+    pgdown: 'PageDown',
+    pgdn: 'PageDown',
+    del: 'Delete',
+    delete: 'Delete',
+    ins: 'Insert',
+    insert: 'Insert',
+    bksp: 'Backspace',
+    backspace: 'Backspace',
+    tab: 'Tab',
+    home: 'Home',
+    end: 'End',
+    shift: 'ShiftLeft',
+    shiftleft: 'ShiftLeft',
+    shiftright: 'ShiftRight',
+    ctrl: 'ControlLeft',
+    control: 'ControlLeft',
+    ctrlleft: 'ControlLeft',
+    ctrlright: 'ControlRight',
+    alt: 'AltLeft',
+    altleft: 'AltLeft',
+    altright: 'AltRight',
+    win: 'MetaLeft',
+    meta: 'MetaLeft',
+    cmd: 'MetaLeft',
+    command: 'MetaLeft',
+    caps: 'CapsLock',
+    capslock: 'CapsLock'
+  }
+
+  if (aliases[lower]) return aliases[lower]
+  if (/^[a-zA-Z]$/.test(raw)) return `Key${raw.toUpperCase()}`
+  if (/^[0-9]$/.test(raw)) return `Digit${raw}`
+  if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(raw)) return `F${raw.slice(1)}`
+  if (/^num([0-9])$/i.test(raw)) return `Numpad${raw.slice(3)}`
+  return raw
+}
