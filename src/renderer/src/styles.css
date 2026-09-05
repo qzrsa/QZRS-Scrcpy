@@ -1351,11 +1351,10 @@ textarea {
 /* macOS-style traffic light dots */
 .titlebar-btn::before {
   content: '';
-  display: inline-block;
+  display: block;
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  margin-right: 0;
 }
 
 .titlebar-btn.close::before {
@@ -1376,14 +1375,34 @@ textarea {
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.1);
 }
 
-/* When hovering, hide the colored dots and show text symbols */
+/* Hover effect: show icon symbols using ::after */
+.titlebar-btn::after {
+  content: '';
+  display: none;
+}
+
+.titlebar-btn.close::after {
+  content: '×';
+  font-size: 14px;
+  color: #fff;
+}
+
+.titlebar-btn.minimize::after {
+  content: '—';
+  font-size: 16px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+.titlebar-btn.maximize::after {
+  content: '□';
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.6);
+}
+
 .titlebar-btn:hover::before {
   display: none;
 }
 
-.titlebar-btn:hover span {
+.titlebar-btn:hover::after {
   display: block;
 }
-
-.titlebar-btn span {
-  display: none;
