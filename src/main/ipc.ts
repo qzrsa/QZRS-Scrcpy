@@ -385,9 +385,10 @@ export function registerIpc(store: Store): AppManager {
     const win = getWin()
     if (!win || win.isDestroyed()) return { ok: false, error: 'no window' }
     try {
-      log(`enterFullscreen: fullscreenable=${win.isFullScreenable()}, current=${win.isFullScreen()}`)
-      win.setFullScreen(true)
-      log(`enterFullscreen: done, now=${win.isFullScreen()}`)
+      log(`enterFullscreen: kiosk=${win.isKiosk()}, frame=${win.isFullScreen()} frameless=${win.isFullScreen()}`)
+      win.setFullScreen(false)
+      win.setKiosk(true)
+      log(`enterFullscreen: done, kiosk=${win.isKiosk()}`)
       return { ok: true }
     } catch (err) {
       log(`enterFullscreen error: ${err}`)
@@ -398,14 +399,34 @@ export function registerIpc(store: Store): AppManager {
     const win = getWin()
     if (!win || win.isDestroyed()) return { ok: false, error: 'no window' }
     try {
-      log(`exitFullscreen: current=${win.isFullScreen()}`)
-      win.setFullScreen(false)
+      log(`exitFullscreen: kiosk=${win.isKiosk()}`)
+      win.setKiosk(false)
       log(`exitFullscreen: done`)
       return { ok: true }
     } catch (err) {
       log(`exitFullscreen error: ${err}`)
       return { ok: false, error: String(err) }
     }
+  })
+
+  // ---- window controls ----
+  ipcMain.handle('window:minimize', () => {
+    const win = getWin()
+    if (!win || win.isDestroyed()) return { ok: false }
+    win.minimize()
+    return { ok: true }
+  })
+  ipcMain.handle('window:maximize', () => {
+    const win = getWin()
+    if (!win || win.isDestroyed()) return { ok: false }
+    win.maximize()
+    return { ok: true }
+  })
+  ipcMain.handle('window:close', () => {
+    const win = getWin()
+    if (!win || win.isDestroyed()) return { ok: false }
+    win.close()
+    return { ok: true }
   })
 
   ipcMain.on('clipboard:write', (_e, text: string) => {

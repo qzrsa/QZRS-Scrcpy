@@ -52,6 +52,9 @@ const api = {
     ipcRenderer.invoke('fullscreen:enter'),
   exitFullscreen: (): Promise<{ ok: boolean; error?: string }> =>
     ipcRenderer.invoke('fullscreen:exit'),
+  minimizeWindow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('window:minimize'),
+  maximizeWindow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('window:maximize'),
+  closeWindow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('window:close'),
   resolvePaths: (): Promise<{ adbPath: string; serverPath: string; scrcpyPath: string }> =>
     ipcRenderer.invoke('settings:resolvePaths'),
   resolveScrcpy: (): Promise<string> => ipcRenderer.invoke('external-scrcpy:resolve'),

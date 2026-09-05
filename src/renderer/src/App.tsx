@@ -228,6 +228,15 @@ export default function App(): JSX.Element {
 
   return (
     <div className={`app ${fullscreen ? 'fullscreen' : ''}`}>
+      {/* Custom frameless title bar with macOS-style traffic lights */}
+      <div className="window-titlebar">
+        <div className="titlebar-drag-region" />
+        <div className="titlebar-buttons">
+          <button className="titlebar-btn close" title="关闭 (Alt+F4)" onClick={() => void window.api.closeWindow()}>×</button>
+          <button className="titlebar-btn minimize" title="最小化" onClick={() => void window.api.minimizeWindow()}>─</button>
+          <button className="titlebar-btn maximize" title="最大化" onClick={() => void window.api.maximizeWindow()}>□</button>
+        </div>
+      </div>
       <DeviceSidebar
         activeSessionSerial={activeSerial}
         onStart={handleStart}

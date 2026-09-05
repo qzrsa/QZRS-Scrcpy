@@ -19,7 +19,7 @@ function createWindow(): void {
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
-    fullscreenable: true,
+    frame: false, // 自定义标题栏，移除系统 chrome
     title: 'QZRS Scrcpy',
     backgroundColor: '#0f1115',
     webPreferences: {
