@@ -17,11 +17,14 @@ interface Store {
   sessions: SessionInfo[]
   settings: AppSettings
   keymaps: KeymapConfig[]
+  /** the keymap referenced by settings.activeKeymapId, or null if none */
+  activeKeymap: KeymapConfig | null
   refreshDevices: () => void
   startSession: (serial: string, overrides?: Partial<SessionOptions>) => Promise<void>
   stopSession: (sessionId: string) => Promise<void>
   updateSettings: (s: AppSettings) => Promise<void>
   updateKeymaps: (k: KeymapConfig[]) => Promise<void>
+  setActiveKeymapId: (id: string | null) => Promise<void>
 }
 
 const Ctx = createContext<Store | null>(null)
@@ -122,7 +125,19 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     await window.api.setKeymaps(k)
   }, [])
 
+  const setActiveKeymapId = useCallback(
+    async (id: string | null) => {
+      if (!settings) return
+      const next = { ...settings, activeKeymapId: id }
+      setSettings(next)
+      await window.api.setSettings(next)
+    },
+    [settings]
+  )
+
   if (!settings) return <></>
+
+  const activeKeymap = settings.activeKeymapId ? keymaps.find((k) => k.id === settings.activeKeymapId) ?? null : null
 
   return (
     <Ctx.Provider
@@ -131,11 +146,13 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         sessions,
         settings,
         keymaps,
+        activeKeymap,
         refreshDevices,
         startSession,
         stopSession,
         updateSettings,
-        updateKeymaps
+        updateKeymaps,
+        setActiveKeymapId
       }}
     >
       {children}

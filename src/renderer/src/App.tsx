@@ -21,7 +21,7 @@ interface Toast {
 }
 
 export default function App(): JSX.Element {
-  const { devices, sessions, settings, startSession, stopSession, updateSettings } = useApp()
+  const { devices, sessions, settings, activeKeymap, startSession, stopSession, updateSettings } = useApp()
   const [activeSerial, setActiveSerial] = useState<string | null>(null)
   const [embedSerial, setEmbedSerial] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
@@ -217,7 +217,7 @@ export default function App(): JSX.Element {
             embedSerial === activeSession.serial ? (
               <EmbeddedScrcpy serial={activeSession.serial} onError={(m) => showToast(m, 'error')} />
             ) : (
-              <MirrorView session={activeSession} send={send} onError={(m) => showToast(m, 'error')} onFullscreen={() => setFullscreen((f) => !f)} decoderAcceleration={settings.decoderAcceleration} onStats={handleRenderStats} />
+              <MirrorView session={activeSession} send={send} onError={(m) => showToast(m, 'error')} onFullscreen={() => setFullscreen((f) => !f)} decoderAcceleration={settings.decoderAcceleration} onStats={handleRenderStats} keymap={activeKeymap} />
             )
           ) : (
             <div className="empty-state">

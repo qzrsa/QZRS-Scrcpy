@@ -121,29 +121,69 @@ export interface AppSettings {
   session: Omit<SessionOptions, 'audio'>
   /** whether to enable group control (broadcast input to all sessions) */
   groupControl: boolean
+  /** id of the active keymap; null = no keymap active (every key → Android keycode) */
+  activeKeymapId: string | null
 }
+
+/**
+ * Keyboard → on-screen action types.
+ *
+ * - `tap`    : keydown → DOWN, keyup → UP. If `duration > 0`, auto UP after N ms (long-press tap).
+ * - `hold`   : keydown → DOWN, keyup → UP. Held while key pressed (WASD walking, sustained fire).
+ * - `repeat` : keydown → DOWN, then DOWN+UP every `repeatMs` ms (auto-fire / combo). keyup → UP.
+ * - `view`   : keydown → DOWN at (x, y), then MOVE in direction (viewDx, viewDy) every `repeatMs` ms.
+ *              keyup → UP. Used for keyboard-driven view rotation.
+ * - `swipe`  : keydown → DOWN at (x, y), animate MOVE to (x2, y2) over `duration` ms, then UP.
+ *              One-shot per keydown.
+ * - `keycode`: keydown → Android keycode DOWN, keyup → keycode UP.
+ */
+export type KeymapAction = 'tap' | 'hold' | 'repeat' | 'view' | 'swipe' | 'keycode'
 
 export interface KeymapBinding {
   /** physical key identifier (KeyboardEvent.code) */
   key: string
   /** action type */
-  action: 'tap' | 'swipe' | 'keycode'
-  /** for tap/swipe: normalized coordinate [0..1] relative to video */
+  action: KeymapAction
+  /** for tap/hold/repeat/view: normalized coordinate [0..1] relative to video */
   x: number
   y: number
-  /** for swipe only */
+  /** for swipe only: end coordinate */
   x2: number
   y2: number
-  /** swipe duration in ms */
+  /** swipe duration (ms); tap auto-release duration (ms); view/hold unused */
   duration: number
+  /** view: direction vector per tick, normalized [-1..1]. dx=0,dy=-1 = look up */
+  viewDx: number
+  viewDy: number
+  /** repeat: tap interval ms; view: tick interval ms; others unused */
+  repeatMs: number
   /** for keycode action */
   keycode: number
+  /** optional human-readable label shown on the canvas overlay */
+  label: string
 }
 
 export interface KeymapConfig {
   id: string
   name: string
   bindings: KeymapBinding[]
+  /** passive overlay buttons drawn on the video canvas (准星 etc.) */
+  overlays: KeymapOverlay[]
+}
+
+/** A single floating overlay button drawn on the video canvas (准星 / crosshair). */
+export interface KeymapOverlay {
+  /** unique id within the active keymap */
+  id: string
+  /** normalized center [0..1] */
+  x: number
+  y: number
+  /** normalized radius [0..1] of the longer video edge */
+  radius: number
+  /** icon symbol or short label shown at the center */
+  label: string
+  /** semi-transparent fill color */
+  color: string
 }
 
 export interface AdbShellResult {

@@ -793,6 +793,11 @@ textarea {
   background: var(--bg);
 }
 
+.keymap-card.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
 .keymap-card .head {
   display: flex;
   align-items: center;
@@ -828,6 +833,38 @@ textarea {
 .binding-row .action-desc {
   color: var(--text-dim);
   flex: 1;
+}
+
+/* ===== Keymap overlay (rendered on top of the video canvas) ===== */
+.keymap-overlay-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.keymap-overlay {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.keymap-overlay-label {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 11px;
+  font-weight: 600;
+  text-shadow: 0 0 4px rgba(0, 0, 0, 0.7);
+  user-select: none;
+}
+
+.overlay-section {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
 }
 
 /* ===== Terminal / tools ===== */

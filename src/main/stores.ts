@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   theme: 'dark',
   decoderAcceleration: 'auto',
   groupControl: false,
+  activeKeymapId: null,
   session: {
     bitRate: 8000000,
     maxFps: 0,
