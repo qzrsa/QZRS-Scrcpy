@@ -166,7 +166,11 @@ export function MirrorView({
     const px = normToVideo(binding.x, binding.y)
 
     // Group bindings (e.g. WASD stick): share one pointerId and one center point.
-    // First key = pointer DOWN at center then MOVE to direction. Subsequent key = MOVE to new direction.
+    // Strategy that actually works for game stick UIs:
+    //   - First key: DOWN directly at the direction point (NOT at center) so the game sees
+    //     a "press at the W edge" immediately, then keep emitting MOVE every 50ms so the
+    //     game keeps registering the finger as still pressed at that direction.
+    //   - Subsequent keys: reuse the same pointerId, just MOVE to the new direction.
     if (binding.groupId) {
       let groupState: BindingState | undefined
       for (const s of bindingStateRef.current.values()) {
@@ -191,25 +195,31 @@ export function MirrorView({
         nextPointerIdRef.current -= 1
       }
 
-      const center = normToVideo(centerX, centerY)
       if (!groupState) {
-        // 手游摇杆：先 DOWN 在中心点，再 MOVE 到方向偏移点。
-        // 加 16ms 间隔，避免两个事件被系统合并成一次“ already at edge”的 press。
-        touch(0, center.x, center.y, px.w, px.h, pid, 0, 1)
-        window.setTimeout(() => {
-          touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
-        }, 16)
+        // First key in group: DOWN directly at the direction point.
+        touch(0, px.x, px.y, px.w, px.h, pid, 0, 1)
       } else {
+        // Another direction already pressed: MOVE to new direction.
         touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
       }
-      bindingStateRef.current.set(stateKey, {
+
+      const newSt: BindingState = {
         pointerId: pid,
         curX: px.x,
         curY: px.y,
         groupId: binding.groupId,
         centerX,
         centerY
-      })
+      }
+      // Emit a periodic MOVE so the game keeps registering the finger as held at this
+      // direction. Without this, only the initial MOVE is sent and some game stick UIs
+      // treat the press as "released" once MOVE stops arriving.
+      newSt.tickTimer = window.setInterval(() => {
+        const cur = bindingStateRef.current.get(stateKey)
+        if (!cur) return
+        touch(2, cur.curX, cur.curY, px.w, px.h, pid, 0, 1)
+      }, 50)
+      bindingStateRef.current.set(stateKey, newSt)
       return true
     }
 
