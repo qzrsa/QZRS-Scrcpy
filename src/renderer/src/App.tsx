@@ -26,6 +26,7 @@ export default function App(): JSX.Element {
   const [embedSerial, setEmbedSerial] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
   const [keymapEditing, setKeymapEditing] = useState(false)
+  const [debugOverlay, setDebugOverlay] = useState(false)
   const [connectOpen, setConnectOpen] = useState(false)
   const [clipboardOpen, setClipboardOpen] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -225,6 +226,7 @@ export default function App(): JSX.Element {
           embedActive={embedSerial === activeSession?.serial}
           infoActive={statsOpen}
           keymapEditing={keymapEditing}
+          debugActive={debugOverlay}
           send={send}
           onToggleGroupControl={toggleGroupControl}
           onToggleFullscreen={() => setFullscreen((f) => !f)}
@@ -237,6 +239,7 @@ export default function App(): JSX.Element {
           onToggleKeymapEdit={handleToggleKeymapEdit}
           onOpenTools={() => setPanel('tools')}
           onOpenSettings={() => setPanel('settings')}
+          onToggleDebug={() => setDebugOverlay((v) => !v)}
           onStop={() => void handleStop()}
         />
 
@@ -254,6 +257,7 @@ export default function App(): JSX.Element {
               onStats={handleRenderStats}
               keymap={activeKeymap}
               editing={keymapEditing}
+              debug={debugOverlay}
               onEditClose={() => setKeymapEditing(false)}
               onKeymapChange={handleKeymapChange}
             />

@@ -17,6 +17,8 @@ interface Props {
   keymap: KeymapConfig | null
   /** whether the visual keymap editor is open over the video */
   editing?: boolean
+  /** show the rolling input debug log overlay (off by default) */
+  debug?: boolean
   /** called when the editor requests to close (save or cancel) */
   onEditClose?: () => void
   onKeymapChange?: (k: KeymapConfig) => void
@@ -38,6 +40,7 @@ export function MirrorView({
   onStats,
   keymap,
   editing,
+  debug,
   onEditClose,
   onKeymapChange
 }: Props): JSX.Element {
@@ -53,11 +56,15 @@ export function MirrorView({
   /** mirror of the active keymap, kept in a ref so the keydown handler always reads the latest */
   const keymapRef = useRef<KeymapConfig | null>(keymap)
   keymapRef.current = keymap
-  /** debug state: rolling log of the last key events / touch commands sent */
+  /** debug state: rolling log of the last key events / touch commands sent (only when `debug`) */
   const [debugLines, setDebugLines] = useState<string[]>([])
-  const pushDebug = useCallback((line: string): void => {
-    setDebugLines((prev) => [...prev, line].slice(-6))
-  }, [])
+  const pushDebug = useCallback(
+    (line: string): void => {
+      if (!debug) return
+      setDebugLines((prev) => [...prev, line].slice(-6))
+    },
+    [debug]
+  )
 
   // (Re)create the decoder whenever the active session changes.
   useEffect(() => {
@@ -528,7 +535,7 @@ export function MirrorView({
           onClose={onEditClose ?? (() => { /* noop */ })}
         />
       )}
-      {debugLines.length > 0 && (
+      {debug && debugLines.length > 0 && (
         <div className="mirror-debug-overlay">
           {debugLines.map((l, i) => (
             <div key={i}>{l}</div>

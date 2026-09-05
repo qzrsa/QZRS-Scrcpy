@@ -28,6 +28,7 @@ interface Props {
   embedActive: boolean
   infoActive: boolean
   keymapEditing: boolean
+  debugActive: boolean
   send: (cmd: ControlCommand) => void
   onToggleGroupControl: () => void
   onToggleFullscreen: () => void
@@ -40,6 +41,7 @@ interface Props {
   onToggleKeymapEdit: () => void
   onOpenTools: () => void
   onOpenSettings: () => void
+  onToggleDebug: () => void
   onStop: () => void
 }
 
@@ -149,6 +151,14 @@ export function Toolbar(p: Props): JSX.Element {
       </button>
       <button className="icon-btn" title="终端 / 文件" onClick={p.onOpenTools}>
         <IconTerminal width={19} height={19} />
+      </button>
+      <button
+        className={`icon-btn ${p.debugActive ? 'start' : ''}`}
+        title={p.debugActive ? '关闭按键调试日志' : '显示按键调试日志（排查按键映射用）'}
+        onClick={p.onToggleDebug}
+      >
+        <IconTerminal width={19} height={19} />
+        <span style={{ fontSize: 9, position: 'absolute', bottom: 2, right: 2 }}>D</span>
       </button>
       <button className="icon-btn" title="设置" onClick={p.onOpenSettings}>
         <IconSettings width={19} height={19} />
