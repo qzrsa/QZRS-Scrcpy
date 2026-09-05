@@ -193,8 +193,12 @@ export function MirrorView({
 
       const center = normToVideo(centerX, centerY)
       if (!groupState) {
+        // 手游摇杆：先 DOWN 在中心点，再 MOVE 到方向偏移点。
+        // 加 16ms 间隔，避免两个事件被系统合并成一次“ already at edge”的 press。
         touch(0, center.x, center.y, px.w, px.h, pid, 0, 1)
-        touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
+        window.setTimeout(() => {
+          touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
+        }, 16)
       } else {
         touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
       }

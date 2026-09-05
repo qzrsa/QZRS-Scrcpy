@@ -119,18 +119,33 @@ export function KeymapPanel({ onClose, onOpenVisualEditor }: Props): JSX.Element
     if (activeId === cid) setActiveId(null)
   }
 
+  const WASD_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD']
+
   const addBindingFromPreset = (cid: string, preset: (typeof PRESETS)[number]): void => {
-    const b: KeymapBinding = {
-      ...emptyBinding(preset.key),
-      action: preset.action,
-      x: preset.x,
-      y: preset.y,
-      viewDx: preset.viewDx ?? 0,
-      viewDy: preset.viewDy ?? 0,
-      repeatMs: preset.repeatMs ?? 100,
-      label: preset.label2 ?? ''
-    }
-    setConfigs((prev) => prev.map((c) => (c.id === cid ? { ...c, bindings: [...c.bindings, b] } : c)))
+    setConfigs((prev) => {
+      const cfg = prev.find((c) => c.id === cid)
+      if (!cfg) return prev
+
+      let groupId: string | null = null
+      if (WASD_KEYS.includes(preset.key)) {
+        // WASD 四方向必须共享 groupId，否则会被当成四个独立触摸点
+        const existing = cfg.bindings.find((b) => WASD_KEYS.includes(b.key) && b.groupId)
+        groupId = existing?.groupId ?? `wasd-${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`
+      }
+
+      const b: KeymapBinding = {
+        ...emptyBinding(preset.key),
+        action: preset.action,
+        x: preset.x,
+        y: preset.y,
+        viewDx: preset.viewDx ?? 0,
+        viewDy: preset.viewDy ?? 0,
+        repeatMs: preset.repeatMs ?? 100,
+        label: preset.label2 ?? '',
+        groupId
+      }
+      return prev.map((c) => (c.id === cid ? { ...c, bindings: [...c.bindings, b] } : c))
+    })
   }
 
   const addOverlay = (cid: string): void => {
