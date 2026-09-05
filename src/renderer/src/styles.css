@@ -113,6 +113,12 @@ textarea {
   z-index: 100;
 }
 
+.app.fullscreen .stage {
+  flex: none;
+  width: 100%;
+  height: 100%;
+}
+
 .float-exit {
   position: fixed;
   top: 16px;
