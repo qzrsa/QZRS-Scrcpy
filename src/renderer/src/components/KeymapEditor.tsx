@@ -86,6 +86,8 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
   const [dragging, setDragging] = useState(false)
   const [videoRect, setVideoRect] = useState<DOMRect | null>(null)
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null)
+  /** Which binding is currently being recorded (by stable id). null = no recording. */
+  const [recordingId, setRecordingId] = useState<string | null>(null)
 
   /**
    * Drag snapshot. Positions are captured once at drag start and the move handler
@@ -303,6 +305,29 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
     }
   }, [dragging, toNorm])
 
+  /** Record a key for the binding whose id matches `recordingId`. */
+  useEffect(() => {
+    if (recordingId === null) return
+    const onKey = (e: KeyboardEvent): void => {
+      // ESC cancels recording without consuming the key
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setRecordingId(null)
+        return
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      const newKey = normalizeKeyCode(e.code)
+      setDraft((prev) => ({
+        ...prev,
+        bindings: prev.bindings.map((b) => (bindingKey(b) === recordingId ? { ...b, key: newKey } : b))
+      }))
+      setRecordingId(null)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [recordingId])
+
   /** Group bindings by groupId; WASD pad is one visual group. */
   const groups = useMemo((): { groupId: string | null; bindings: KeymapBinding[] }[] => {
     const map = new Map<string, KeymapBinding[]>()
@@ -376,10 +401,11 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
           // Single binding
           const b = g.bindings[0]!
           const label = b.label || b.key.replace('Key', '').replace('Arrow', '')
+          const isRecording = recordingId === bindingKey(b)
           return (
             <div
               key={bindingKey(b)}
-              className="keymap-editor-control"
+              className={`keymap-editor-control ${isRecording ? 'recording' : ''}`}
               style={{ left: `${b.x * 100}%`, top: `${b.y * 100}%` }}
               onMouseDown={(e) => onControlMouseDown(e, b)}
             >
@@ -393,12 +419,23 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
                   <option value="swipe">滑动</option>
                   <option value="keycode">键码</option>
                 </select>
+                <button
+                  className={`record-btn ${isRecording ? 'recording' : ''}`}
+                  title={isRecording ? '按 ESC 取消录制' : '点击后按任意键录制'}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setRecordingId(isRecording ? null : bindingKey(b))
+                  }}
+                >
+                  {isRecording ? '●' : '录'}
+                </button>
                 <input
                   type="text"
                   value={b.key}
                   onChange={(e) => onKeyChange(b, normalizeKeyCode(e.target.value))}
-                  title="输入键名，支持中文/拼音/英文（例如：W / A / S / D / 空格 / 开火 / shoot / Space）"
-                  placeholder="输入键名（例如 W / 空格 / 开火）"
+                  title="或手动输入键名"
+                  placeholder="手动输入"
+                  disabled={isRecording}
                   onMouseDown={(e) => e.stopPropagation()}
                 />
                 <button onClick={(e) => { e.stopPropagation(); removeBinding(b) }}>×</button>

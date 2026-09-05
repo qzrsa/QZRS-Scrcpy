@@ -1095,6 +1095,45 @@ textarea {
   width: auto;
 }
 
+/* Record button */
+.record-btn {
+  min-width: 26px;
+  height: 22px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+
+.record-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+
+.record-btn.recording {
+  background: #ff4444;
+  border-color: #ff4444;
+  color: #fff;
+  animation: record-pulse 1s ease-in-out infinite;
+}
+
+@keyframes record-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+/* Recording state for the control itself */
+.keymap-editor-control.recording {
+  border-color: #ff4444;
+  box-shadow: 0 0 8px rgba(255, 68, 68, 0.5);
+}
+
 /* Overlay in editor */
 .keymap-editor-overlay {
   position: absolute;
