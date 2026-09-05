@@ -545,7 +545,6 @@ export function MirrorView({
         onPointerLeave={() => (mouseDownRef.current = false)}
         onWheel={onWheel}
         onContextMenu={onContextMenu}
-        onDoubleClick={onFullscreen}
       />
       {keymap && keymap.overlays.length > 0 && <KeymapOverlayLayer keymap={keymap} />}
       {editing && keymap && onKeymapChange && (

@@ -79,10 +79,11 @@ export default function App(): JSX.Element {
     return off
   }, [activeSession?.sessionId])
 
-  // ESC exits fullscreen
+  // ESC exits fullscreen; F12 toggles fullscreen.
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') setFullscreen(false)
+      else if (e.key === 'F12') { e.preventDefault(); setFullscreen((f) => !f) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
