@@ -372,11 +372,11 @@ export function MirrorView({
     if (binding.action === 'tap') return // already self-released
     if (binding.action === 'swipe') return // already self-released
     const stateKey = `${binding.key}|${binding.action}|${binding.x}|${binding.y}`
-    const st = bindingStateRef.current.get(stateKey)
-    if (!st) return
-    cancelBindingTimers(stateKey)
 
     // Group stick: drop this direction's vector; if others remain, retarget; else lift at center.
+    // MUST run before the bindingStateRef guard below — group state lives only in
+    // groupStateRef (keydown never writes bindingStateRef for group bindings), so checking
+    // bindingStateRef first would swallow every WASD keyup and the stick would never release.
     if (binding.groupId) {
       const gid = binding.groupId
       const gs = groupStateRef.current.get(gid)
@@ -393,6 +393,10 @@ export function MirrorView({
       }
       return
     }
+
+    const st = bindingStateRef.current.get(stateKey)
+    if (!st) return
+    cancelBindingTimers(stateKey)
 
     const px = normToVideo(binding.x, binding.y)
     touch(1, st.curX, st.curY, px.w, px.h, st.pointerId, 0, 0)
