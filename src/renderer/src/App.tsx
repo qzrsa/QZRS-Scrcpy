@@ -79,28 +79,34 @@ export default function App(): JSX.Element {
     return off
   }, [activeSession?.sessionId])
 
-  // ESC exits fullscreen; F12 toggles fullscreen.
+  // F11 enters fullscreen; F12 exits fullscreen.
   // Uses system-level fullscreen when settings.fullscreenMode === 'window'.
   const settingsRef = useRef<AppSettings>(settings)
   settingsRef.current = settings
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        setFullscreen(false)
-        if (settingsRef.current.fullscreenMode === 'window') {
-          window.api.exitFullscreen().catch(() => { /* ignore */ })
+      // F11: enter fullscreen
+      if (e.key === 'F11') {
+        e.preventDefault()
+        if (!fullscreen) {
+          setFullscreen(true)
+          if (settingsRef.current.fullscreenMode === 'window') {
+            window.api.enterFullscreen().catch(() => { /* ignore */ })
+          }
         }
         return
       }
+      // F12: exit fullscreen
       if (e.key === 'F12') {
         e.preventDefault()
-        const next = !fullscreen
-        setFullscreen(next)
-        if (settingsRef.current.fullscreenMode === 'window') {
-          if (next) window.api.enterFullscreen().catch(() => { /* ignore */ })
-          else window.api.exitFullscreen().catch(() => { /* ignore */ })
+        if (fullscreen) {
+          setFullscreen(false)
+          if (settingsRef.current.fullscreenMode === 'window') {
+            window.api.exitFullscreen().catch(() => { /* ignore */ })
+          }
         }
+        return
       }
     }
     window.addEventListener('keydown', onKey)
@@ -307,7 +313,7 @@ export default function App(): JSX.Element {
       </main>
 
       {fullscreen && (
-        <button className="icon-btn float-exit" title="退出全屏 (Esc)" onClick={() => setFullscreen(false)}>
+        <button className="icon-btn float-exit" title="退出全屏 (F12)" onClick={() => setFullscreen(false)}>
           <IconFullscreen width={20} height={20} />
         </button>
       )}
