@@ -179,12 +179,14 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
 
   /** Add a single binding at (x, y). */
   const addBinding = (tool: Extract<ToolType, { id: 'binding' }>, x: number, y: number): void => {
+    /** Default key for each binding type. Empty = user must type their own key (avoids pre-filling a
+     * hardcoded key that cannot be changed — e.g. tap was 'KeyT', holding would lock the user into T). */
     const keyFor: Record<KeymapAction, string> = {
-      tap: 'KeyT',
-      hold: 'KeyH',
-      repeat: 'KeyR',
-      view: 'KeyV',
-      swipe: 'KeyG',
+      tap: '',
+      hold: '',
+      repeat: '',
+      view: '',
+      swipe: '',
       keycode: 'KeyK'
     }
     setDraft((prev) => ({
@@ -390,8 +392,8 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
                   type="text"
                   value={b.key}
                   onChange={(e) => onKeyChange(b, normalizeKeyCode(e.target.value))}
-                  title="KeyboardEvent.code (例如 KeyW / Space / ArrowUp)"
-                  placeholder="KeyW"
+                  title="输入键名，支持中文/拼音/英文（例如：W / A / S / D / 空格 / 开火 / shoot / Space）"
+                  placeholder="输入键名（例如 W / 空格 / 开火）"
                   onMouseDown={(e) => e.stopPropagation()}
                 />
                 <button onClick={(e) => { e.stopPropagation(); removeBinding(b) }}>×</button>
