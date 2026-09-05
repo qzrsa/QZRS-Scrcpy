@@ -140,6 +140,8 @@ export interface AppSettings {
 export type KeymapAction = 'tap' | 'hold' | 'repeat' | 'view' | 'swipe' | 'keycode'
 
 export interface KeymapBinding {
+  /** stable unique id within the keymap; survives coordinate edits (drag) */
+  id: string
   /** physical key identifier (KeyboardEvent.code) */
   key: string
   /** action type */

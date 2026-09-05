@@ -10,6 +10,7 @@ interface Props {
 }
 
 const emptyBinding = (key: string): KeymapBinding => ({
+  id: `b${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`,
   key,
   action: 'tap',
   x: 0.5,

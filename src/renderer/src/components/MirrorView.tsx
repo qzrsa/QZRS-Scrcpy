@@ -4,7 +4,7 @@ import { H264Player } from '../decoder/h264'
 import type { DecoderAcceleration } from '../decoder/h264'
 import { KEYCODE, META, BUTTON, keycodeFromEventCode, normalizeKeyCode } from '../keycodes'
 import type { SessionInfo } from '../store'
-import { KeymapEditor } from './KeymapEditor'
+import { KeymapEditor, Crosshair } from './KeymapEditor'
 
 interface Props {
   session: SessionInfo | null
@@ -51,6 +51,15 @@ export function MirrorView({
   const metaRef = useRef(0)
   /** per-binding runtime state for `hold` / `repeat` / `view` */
   const bindingStateRef = useRef<Map<string, BindingState>>(new Map())
+  /**
+   * Per-group runtime state for stick bindings (WASD).
+   *
+   * The whole stick is ONE finger: a single pointerId, a single interval, and a target
+   * position derived from the sum of all currently-pressed direction vectors. Running one
+   * interval per binding made W+A fight each other (pointer ping-ponging between the two
+   * direction points) instead of combining into a 45° diagonal.
+   */
+  const groupStateRef = useRef<Map<string, GroupStickState>>(new Map())
   /** synthetic pointer id allocator (negative to avoid colliding with mouse/finger) */
   const nextPointerIdRef = useRef(-1)
   /** mirror of the active keymap, kept in a ref so the keydown handler always reads the latest */
@@ -141,7 +150,7 @@ export function MirrorView({
     bindingStateRef.current.delete(bindingKey)
   }
 
-  /** All cleanup of binding timers when the active session changes. */
+  /** All cleanup of binding + stick timers when the active session changes. */
   useEffect(() => {
     const m = bindingStateRef.current
     for (const st of m.values()) {
@@ -149,6 +158,12 @@ export function MirrorView({
       if (st.autoTimer !== undefined) clearTimeout(st.autoTimer)
     }
     m.clear()
+
+    const g = groupStateRef.current
+    for (const gs of g.values()) {
+      if (gs.tickTimer !== undefined) clearInterval(gs.tickTimer)
+    }
+    g.clear()
   }, [session?.sessionId])
 
   /**
@@ -165,6 +180,53 @@ export function MirrorView({
   }, [])
 
   /**
+   * Stick radius for a group: max distance from the group center to any of its bindings.
+   * Combined directions are clamped to this so W+A lands on the rim at 45°, not outside.
+   */
+  const computeGroupRadius = useCallback((groupId: string): number => {
+    const km = keymapRef.current
+    const groupBindings = km ? km.bindings.filter((b) => b.groupId === groupId) : []
+    if (groupBindings.length === 0) return 0.06
+    const cx = groupBindings.reduce((s, b) => s + b.x, 0) / groupBindings.length
+    const cy = groupBindings.reduce((s, b) => s + b.y, 0) / groupBindings.length
+    const r = Math.max(...groupBindings.map((b) => Math.hypot(b.x - cx, b.y - cy)))
+    return Math.max(0.01, r)
+  }, [])
+
+  /** Recompute the combined direction vector from all currently pressed directions. */
+  const updateStickVector = useCallback((gs: GroupStickState): void => {
+    let vx = 0
+    let vy = 0
+    for (const v of gs.vectors.values()) {
+      vx += v.dx
+      vy += v.dy
+    }
+    // Clamp to the rim: W+A sums to (-R,-R) with length R·√2; normalize back to R
+    // so the result is a true 45° direction that stays inside the stick circle.
+    const len = Math.hypot(vx, vy)
+    if (len > gs.maxRadius) {
+      vx = (vx / len) * gs.maxRadius
+      vy = (vy / len) * gs.maxRadius
+    }
+    gs.vx = vx
+    gs.vy = vy
+  }, [])
+
+  /**
+   * One tick for the whole stick: ease the single pointer toward the combined target
+   * and emit a MOVE. Running this once per group (instead of once per binding) is what
+   * stops W+A from ping-ponging between two direction points.
+   */
+  const tickStick = (gid: string): void => {
+    const gs = groupStateRef.current.get(gid)
+    if (!gs) return
+    const target = normToVideo(clamp01(gs.centerX + gs.vx), clamp01(gs.centerY + gs.vy))
+    gs.curX += (target.x - gs.curX) * 0.35
+    gs.curY += (target.y - gs.curY) * 0.35
+    touch(2, gs.curX, gs.curY, target.w, target.h, gs.pointerId, 0, 1)
+  }
+
+  /**
    * Dispatch a keydown through the active keymap.
    * Returns true if the key was handled by a binding.
    */
@@ -175,83 +237,40 @@ export function MirrorView({
 
     const px = normToVideo(binding.x, binding.y)
 
-    // Group bindings (e.g. WASD stick): share one pointerId and one center point.
-    // Strategy that actually works for game stick UIs:
-    //   - First key: DOWN directly at the direction point (NOT at center) so the game sees
-    //     a "press at the W edge" immediately, then keep emitting MOVE every 50ms so the
-    //     game keeps registering the finger as still pressed at that direction.
-    //   - Subsequent keys: reuse the same pointerId, just MOVE to the new direction.
+    // Group bindings (WASD stick): ONE finger for the whole pad.
+    //   - First pressed direction: DOWN at the stick center, then a single interval eases
+    //     the pointer out to that direction.
+    //   - Additional directions: add their vector to the group; the same interval retargets
+    //     to the combined (diagonal) point. W+A therefore moves up-left at 45°.
     if (binding.groupId) {
-      let groupState: BindingState | undefined
-      for (const s of bindingStateRef.current.values()) {
-        if (s.groupId === binding.groupId) {
-          groupState = s
-          break
-        }
-      }
+      const gid = binding.groupId
+      let gs = groupStateRef.current.get(gid)
 
-      let pid: number
-      let centerX: number
-      let centerY: number
-      if (groupState) {
-        pid = groupState.pointerId as number
-        centerX = groupState.centerX ?? binding.x
-        centerY = groupState.centerY ?? binding.y
-      } else {
-        const center = computeGroupCenter(binding.groupId)
-        centerX = center.x
-        centerY = center.y
-        pid = nextPointerIdRef.current
+      if (!gs) {
+        const center = computeGroupCenter(gid)
+        const centerPx = normToVideo(center.x, center.y)
+        const pid = nextPointerIdRef.current
         nextPointerIdRef.current -= 1
+        gs = {
+          pointerId: pid,
+          centerX: center.x,
+          centerY: center.y,
+          maxRadius: computeGroupRadius(gid),
+          vx: 0,
+          vy: 0,
+          curX: centerPx.x,
+          curY: centerPx.y,
+          vectors: new Map()
+        }
+        groupStateRef.current.set(gid, gs)
+        // 手指在摇杆中心按下
+        touch(0, centerPx.x, centerPx.y, centerPx.w, centerPx.h, pid, 0, 1)
+        // 单一 interval 负责所有后续移动（每 33ms，约 30fps）
+        gs.tickTimer = window.setInterval(() => tickStick(gid), 33)
       }
 
-      const center = normToVideo(centerX, centerY)
-      const newSt: BindingState = {
-        pointerId: pid,
-        curX: px.x,
-        curY: px.y,
-        groupId: binding.groupId,
-        centerX,
-        centerY
-      }
-
-      if (!groupState) {
-        // 真实手指行为：先 DOWN 在摇杆中心点，再分 5 步（每步 16ms，共 80ms）
-        // 平滑滑到方向偏移点，之后每 50ms 持续 MOVE 保持手指"按住不松"的状态。
-        touch(0, center.x, center.y, px.w, px.h, pid, 0, 1)
-        let step = 0
-        const totalSteps = 5
-        const rampTimer = window.setInterval(() => {
-          step += 1
-          const t = Math.min(1, step / totalSteps)
-          const cx = center.x + (px.x - center.x) * t
-          const cy = center.y + (px.y - center.y) * t
-          touch(2, cx, cy, px.w, px.h, pid, 0, 1)
-          if (t >= 1) {
-            window.clearInterval(rampTimer)
-            const cur = bindingStateRef.current.get(stateKey)
-            if (cur) {
-              cur.autoTimer = undefined
-              cur.tickTimer = window.setInterval(() => {
-                const c = bindingStateRef.current.get(stateKey)
-                if (!c) return
-                touch(2, c.curX, c.curY, px.w, px.h, pid, 0, 1)
-              }, 50)
-            }
-          }
-        }, 16)
-        newSt.autoTimer = rampTimer
-      } else {
-        // 已有方向键按住中：复用同一 pointerId 直接 MOVE 到新方向，并保持。
-        touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
-        newSt.tickTimer = window.setInterval(() => {
-          const cur = bindingStateRef.current.get(stateKey)
-          if (!cur) return
-          touch(2, cur.curX, cur.curY, px.w, px.h, pid, 0, 1)
-        }, 50)
-      }
-
-      bindingStateRef.current.set(stateKey, newSt)
+      gs.vectors.set(stateKey, { dx: binding.x - gs.centerX, dy: binding.y - gs.centerY })
+      updateStickVector(gs)
       return true
     }
 
@@ -357,21 +376,20 @@ export function MirrorView({
     if (!st) return
     cancelBindingTimers(stateKey)
 
-    // Group stick: if any sibling is still pressed, move to its direction; otherwise lift at center.
+    // Group stick: drop this direction's vector; if others remain, retarget; else lift at center.
     if (binding.groupId) {
-      let other: BindingState | undefined
-      for (const [k, s] of bindingStateRef.current.entries()) {
-        if (k !== stateKey && s.groupId === binding.groupId) {
-          other = s
-          break
-        }
-      }
-      const base = normToVideo(binding.x, binding.y)
-      if (other) {
-        touch(2, other.curX, other.curY, base.w, base.h, st.pointerId, 0, 1)
+      const gid = binding.groupId
+      const gs = groupStateRef.current.get(gid)
+      if (!gs) return
+      gs.vectors.delete(stateKey)
+      if (gs.vectors.size === 0) {
+        // 所有方向都松开 → 手指在中心点抬起
+        if (gs.tickTimer !== undefined) window.clearInterval(gs.tickTimer)
+        const center = normToVideo(gs.centerX, gs.centerY)
+        touch(1, center.x, center.y, center.w, center.h, gs.pointerId, 0, 0)
+        groupStateRef.current.delete(gid)
       } else {
-        const center = normToVideo(st.centerX ?? binding.x, st.centerY ?? binding.y)
-        touch(1, center.x, center.y, base.w, base.h, st.pointerId, 0, 0)
+        updateStickVector(gs)
       }
       return
     }
@@ -554,12 +572,32 @@ interface BindingState {
   curY: number
   /** view action: tick counter for accumulating viewDx/viewDy offset */
   tickN?: number
-  /** group binding (e.g. WASD stick): shared pointerId with siblings */
-  groupId?: string | null
-  /** stick center in normalized coords, used only by group bindings */
-  centerX?: number
-  centerY?: number
 }
+
+/**
+ * Runtime state for one compound stick (WASD group).
+ * The whole group behaves as a single finger: one pointerId, one interval, one target
+ * derived from the vector sum of all currently pressed directions.
+ */
+interface GroupStickState {
+  pointerId: number
+  /** stick center in normalized coords */
+  centerX: number
+  centerY: number
+  /** max deflection from center, in normalized units (clamps diagonals to the rim) */
+  maxRadius: number
+  /** combined direction offset from center, normalized coords */
+  vx: number
+  vy: number
+  /** current pointer position in video pixels (eased toward the target) */
+  curX: number
+  curY: number
+  /** per-binding (stateKey) offset vector relative to center */
+  vectors: Map<string, { dx: number; dy: number }>
+  tickTimer?: number
+}
+
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
 
 /**
  * Draws the passive overlay buttons (准星 etc.) on top of the video canvas.
@@ -590,13 +628,12 @@ function KeymapOverlayLayer({ keymap }: { keymap: KeymapConfig }): JSX.Element {
           style={{
             left: `${o.x * 100}%`,
             top: `${o.y * 100}%`,
-            width: `${o.radius * 100}%`,
-            height: `${o.radius * 100}%`,
-            background: o.color,
+            width: `${o.radius * 200}%`,
+            height: `${o.radius * 200}%`,
             transform: 'translate(-50%, -50%)'
           }}
         >
-          <span className="keymap-overlay-label">{o.label}</span>
+          <Crosshair />
         </div>
       ))}
     </div>

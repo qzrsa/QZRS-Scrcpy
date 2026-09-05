@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import type { KeymapBinding, KeymapConfig, KeymapOverlay, KeymapAction } from '@shared/types'
 import { normalizeKeyCode } from '../keycodes'
 
@@ -15,7 +15,11 @@ interface Props {
 /** Radius of the WASD pad from center to each direction key. */
 const WASD_RADIUS = 0.06
 
+const newId = (prefix: string): string =>
+  `${prefix}${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`
+
 const emptyBinding = (key: string, action: KeymapAction): KeymapBinding => ({
+  id: newId('b'),
   key,
   action,
   x: 0.5,
@@ -31,6 +35,8 @@ const emptyBinding = (key: string, action: KeymapAction): KeymapBinding => ({
   groupId: null
 })
 
+const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
+
 type ToolType =
   | { id: 'wasd' }
   | { id: 'binding'; action: KeymapAction; label: string }
@@ -43,7 +49,7 @@ const PALETTE: { icon: string; label: string; tool: ToolType; hint: string }[] =
   { icon: 'R', label: '连击', tool: { id: 'binding', action: 'repeat', label: '连击' }, hint: '按住后周期重复点击' },
   { icon: 'V', label: '键盘视角', tool: { id: 'binding', action: 'view', label: '视角' }, hint: '按住后缓慢滑动视角' },
   { icon: 'K', label: 'Android 按键', tool: { id: 'binding', action: 'keycode', label: '键' }, hint: '发送 Android keycode' },
-  { icon: '◎', label: '准星', tool: { id: 'overlay', label: '准星' }, hint: '固定显示在画面上的准星/提示' }
+  { icon: '✛', label: '准星', tool: { id: 'overlay', label: '准星' }, hint: '固定显示在画面上的准星/提示' }
 ]
 
 function toolKey(t: ToolType): string {
@@ -52,28 +58,63 @@ function toolKey(t: ToolType): string {
   return `binding|${t.action}|${t.label}`
 }
 
-/** Stable key for a binding within a config. */
+/**
+ * Stable identity for a binding. Must NOT include x/y — otherwise the key changes
+ * mid-drag and the item can no longer be matched (the old code dragged exactly once).
+ */
 function bindingKey(b: KeymapBinding): string {
-  return `${b.key}|${b.groupId ?? ''}|${b.x.toFixed(5)}|${b.y.toFixed(5)}`
+  return b.id || `${b.key}|${b.action}|${b.groupId ?? ''}`
+}
+
+/** Crosshair marker (准星): four ticks + a small circle, not text. Exported for runtime overlay use. */
+export function Crosshair(): JSX.Element {
+  return (
+    <svg className="crosshair" viewBox="0 0 100 100" aria-hidden="true">
+      <line x1="50" y1="2" x2="50" y2="34" />
+      <line x1="50" y1="66" x2="50" y2="98" />
+      <line x1="2" y1="50" x2="34" y2="50" />
+      <line x1="66" y1="50" x2="98" y2="50" />
+      <circle cx="50" cy="50" r="17" />
+      <circle className="dot" cx="50" cy="50" r="3" />
+    </svg>
+  )
 }
 
 export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose }: Props): JSX.Element {
   const [draft, setDraft] = useState<KeymapConfig>(keymap)
   const [selectedTool, setSelectedTool] = useState<ToolType | null>(null)
-  const [dragging, setDragging] = useState<{
-    groupId: string | null
-    bindingKey: string
-    startX: number
-    startY: number
-    initX: number
-    initY: number
-  } | null>(null)
+  const [dragging, setDragging] = useState(false)
   const [videoRect, setVideoRect] = useState<DOMRect | null>(null)
   const [containerRect, setContainerRect] = useState<DOMRect | null>(null)
+
+  /**
+   * Drag snapshot. Positions are captured once at drag start and the move handler
+   * always computes `init + totalDelta` from this snapshot — never `current + delta`,
+   * which used to compound on every mousemove and made the drag wildly over-sensitive.
+   */
+  const dragRef = useRef<{
+    startX: number
+    startY: number
+    init: Map<string, { x: number; y: number }>
+    keys: Set<string>
+  } | null>(null)
 
   // Keep draft in sync if the parent swaps the keymap while we are open.
   useEffect(() => {
     setDraft(keymap)
+  }, [keymap.id])
+
+  // Backfill ids on keymaps created before `KeymapBinding.id` existed.
+  useEffect(() => {
+    setDraft((prev) => {
+      let changed = false
+      const bindings = prev.bindings.map((b) => {
+        if (b.id) return b
+        changed = true
+        return { ...b, id: newId('b') }
+      })
+      return changed ? { ...prev, bindings } : prev
+    })
   }, [keymap.id])
 
   // Track the canvas rendered rect and container rect.
@@ -115,25 +156,22 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
     (clientX: number, clientY: number): { x: number; y: number } => {
       if (!videoRect) return { x: 0.5, y: 0.5 }
       return {
-        x: Math.min(1, Math.max(0, (clientX - videoRect.left) / videoRect.width)),
-        y: Math.min(1, Math.max(0, (clientY - videoRect.top) / videoRect.height))
+        x: clamp01((clientX - videoRect.left) / videoRect.width),
+        y: clamp01((clientY - videoRect.top) / videoRect.height)
       }
     },
     [videoRect]
   )
 
-  /** Generate a fresh group id. */
-  const newGroup = (): string => `g${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`
-
   /** Add a WASD pad centered at (x, y). */
   const addWasd = (x: number, y: number): void => {
-    const gid = newGroup()
+    const gid = newId('g')
     setDraft((prev) => {
       const additions: KeymapBinding[] = [
-        { ...emptyBinding('KeyW', 'hold'), x, y: y - WASD_RADIUS, label: 'W', groupId: gid },
-        { ...emptyBinding('KeyA', 'hold'), x: x - WASD_RADIUS, y, label: 'A', groupId: gid },
-        { ...emptyBinding('KeyS', 'hold'), x, y: y + WASD_RADIUS, label: 'S', groupId: gid },
-        { ...emptyBinding('KeyD', 'hold'), x: x + WASD_RADIUS, y, label: 'D', groupId: gid }
+        { ...emptyBinding('KeyW', 'hold'), x, y: clamp01(y - WASD_RADIUS), label: 'W', groupId: gid },
+        { ...emptyBinding('KeyA', 'hold'), x: clamp01(x - WASD_RADIUS), y, label: 'A', groupId: gid },
+        { ...emptyBinding('KeyS', 'hold'), x, y: clamp01(y + WASD_RADIUS), label: 'S', groupId: gid },
+        { ...emptyBinding('KeyD', 'hold'), x: clamp01(x + WASD_RADIUS), y, label: 'D', groupId: gid }
       ]
       return { ...prev, bindings: [...prev.bindings, ...additions] }
     })
@@ -141,15 +179,17 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
 
   /** Add a single binding at (x, y). */
   const addBinding = (tool: Extract<ToolType, { id: 'binding' }>, x: number, y: number): void => {
-    let key = 'KeyA'
-    if (tool.action === 'keycode') key = 'KeyK'
-    if (tool.action === 'tap') key = 'KeyT'
-    if (tool.action === 'hold') key = 'KeyH'
-    if (tool.action === 'repeat') key = 'KeyR'
-    if (tool.action === 'view') key = 'KeyV'
+    const keyFor: Record<KeymapAction, string> = {
+      tap: 'KeyT',
+      hold: 'KeyH',
+      repeat: 'KeyR',
+      view: 'KeyV',
+      swipe: 'KeyG',
+      keycode: 'KeyK'
+    }
     setDraft((prev) => ({
       ...prev,
-      bindings: [...prev.bindings, { ...emptyBinding(key, tool.action), x, y, label: tool.label }]
+      bindings: [...prev.bindings, { ...emptyBinding(keyFor[tool.action] ?? 'KeyA', tool.action), x, y, label: tool.label }]
     }))
   }
 
@@ -159,7 +199,7 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
       ...prev,
       overlays: [
         ...prev.overlays,
-        { id: `ov${Date.now().toString(36)}`, x, y, radius: 0.04, label: tool.label, color: 'rgba(255,255,255,0.25)' }
+        { id: newId('ov'), x, y, radius: 0.04, label: tool.label, color: 'rgba(255,255,255,0.25)' }
       ]
     }))
   }
@@ -191,19 +231,27 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
     setDraft((prev) => ({ ...prev, overlays: prev.overlays.filter((o) => o.id !== id) }))
   }
 
+  /** Begin a drag. Captures a snapshot so movement stays 1:1 with the cursor. */
+  const beginDrag = (startX: number, startY: number, items: { key: string; x: number; y: number }[]): void => {
+    const init = new Map<string, { x: number; y: number }>()
+    const keys = new Set<string>()
+    for (const it of items) {
+      keys.add(it.key)
+      init.set(it.key, { x: it.x, y: it.y })
+    }
+    dragRef.current = { startX, startY, init, keys }
+    setDragging(true)
+  }
+
   const onControlMouseDown = (e: React.MouseEvent, b: KeymapBinding): void => {
     if (selectedTool) return // placement mode; ignore drag
     e.preventDefault()
     e.stopPropagation()
     const { x, y } = toNorm(e.clientX, e.clientY)
-    setDragging({
-      groupId: b.groupId,
-      bindingKey: bindingKey(b),
-      startX: x,
-      startY: y,
-      initX: b.x,
-      initY: b.y
-    })
+    const items = b.groupId
+      ? draft.bindings.filter((o) => o.groupId === b.groupId).map((o) => ({ key: bindingKey(o), x: o.x, y: o.y }))
+      : [{ key: bindingKey(b), x: b.x, y: b.y }]
+    beginDrag(x, y, items)
   }
 
   const onOverlayMouseDown = (e: React.MouseEvent, o: KeymapOverlay): void => {
@@ -211,51 +259,35 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
     e.preventDefault()
     e.stopPropagation()
     const { x, y } = toNorm(e.clientX, e.clientY)
-    setDragging({
-      groupId: null,
-      bindingKey: `overlay|${o.id}`,
-      startX: x,
-      startY: y,
-      initX: o.x,
-      initY: o.y
-    })
+    beginDrag(x, y, [{ key: `overlay|${o.id}`, x: o.x, y: o.y }])
   }
 
   useEffect(() => {
     if (!dragging) return
     const onMove = (e: MouseEvent): void => {
+      const d = dragRef.current
+      if (!d) return
       const { x, y } = toNorm(e.clientX, e.clientY)
-      const dx = x - dragging.startX
-      const dy = y - dragging.startY
-      setDraft((prev) => {
-        if (dragging.groupId) {
-          // Move all bindings in the group together, preserving their relative offsets.
-          return {
-            ...prev,
-            bindings: prev.bindings.map((b) => {
-              if (b.groupId !== dragging.groupId) return b
-              return { ...b, x: Math.min(1, Math.max(0, b.x + dx)), y: Math.min(1, Math.max(0, b.y + dy)) }
-            })
-          }
-        }
-        if (dragging.bindingKey.startsWith('overlay|')) {
-          const oid = dragging.bindingKey.slice(8)
-          return {
-            ...prev,
-            overlays: prev.overlays.map((o) =>
-              o.id === oid ? { ...o, x: Math.min(1, Math.max(0, dragging.initX + dx)), y: Math.min(1, Math.max(0, dragging.initY + dy)) } : o
-            )
-          }
-        }
-        return {
-          ...prev,
-          bindings: prev.bindings.map((b) =>
-            bindingKey(b) === dragging.bindingKey ? { ...b, x: Math.min(1, Math.max(0, dragging.initX + dx)), y: Math.min(1, Math.max(0, dragging.initY + dy)) } : b
-          )
-        }
-      })
+      const dx = x - d.startX
+      const dy = y - d.startY
+      setDraft((prev) => ({
+        ...prev,
+        bindings: prev.bindings.map((b) => {
+          const k = bindingKey(b)
+          const init = d.init.get(k)
+          return d.keys.has(k) && init ? { ...b, x: clamp01(init.x + dx), y: clamp01(init.y + dy) } : b
+        }),
+        overlays: prev.overlays.map((o) => {
+          const k = `overlay|${o.id}`
+          const init = d.init.get(k)
+          return d.keys.has(k) && init ? { ...o, x: clamp01(init.x + dx), y: clamp01(init.y + dy) } : o
+        })
+      }))
     }
-    const onUp = (): void => setDragging(null)
+    const onUp = (): void => {
+      dragRef.current = null
+      setDragging(false)
+    }
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
     return () => {
@@ -313,7 +345,7 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
                 key={g.groupId}
                 className="keymap-editor-wasd"
                 style={{ left: `${centerX * 100}%`, top: `${centerY * 100}%` }}
-                onMouseDown={(e) => onControlMouseDown(e, g.bindings[0])}
+                onMouseDown={(e) => onControlMouseDown(e, g.bindings[0]!)}
               >
                 <div className="wasd-ring" />
                 <div className="wasd-dot" />
@@ -330,7 +362,7 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
                     {b.label || b.key.replace('Key', '').replace('Arrow', '')}
                   </div>
                 ))}
-                <button className="keymap-editor-del" onClick={(e) => { e.stopPropagation(); removeBinding(g.bindings[0]) }}>×</button>
+                <button className="keymap-editor-del" onClick={(e) => { e.stopPropagation(); removeBinding(g.bindings[0]!) }}>×</button>
               </div>
             )
           }
@@ -368,15 +400,15 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
           )
         })}
 
-        {/* Overlays */}
+        {/* Overlays (crosshair markers) */}
         {draft.overlays.map((o) => (
           <div
             key={o.id}
             className="keymap-editor-overlay"
-            style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.radius * 200}%`, height: `${o.radius * 200}%`, background: o.color }}
+            style={{ left: `${o.x * 100}%`, top: `${o.y * 100}%`, width: `${o.radius * 200}%`, height: `${o.radius * 200}%` }}
             onMouseDown={(e) => onOverlayMouseDown(e, o)}
           >
-            <span>{o.label}</span>
+            <Crosshair />
             <button className="keymap-editor-del" onClick={(e) => { e.stopPropagation(); removeOverlay(o.id) }}>×</button>
           </div>
         ))}
