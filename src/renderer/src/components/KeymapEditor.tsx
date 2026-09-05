@@ -247,6 +247,11 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
 
   const onControlMouseDown = (e: React.MouseEvent, b: KeymapBinding): void => {
     if (selectedTool) return // placement mode; ignore drag
+    // Don't intercept mousedown on interactive controls (input / select / button) — let them
+    // get focus normally so the user can type / paste. These elements also call
+    // e.stopPropagation() on their own mousedown to prevent accidental drag.
+    const t = e.target as HTMLElement
+    if (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'BUTTON') return
     e.preventDefault()
     e.stopPropagation()
     const { x, y } = toNorm(e.clientX, e.clientY)
