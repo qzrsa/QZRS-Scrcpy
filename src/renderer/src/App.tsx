@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ControlCommand, SessionStats } from '@shared/types'
+import type { ControlCommand, KeymapConfig, SessionStats } from '@shared/types'
 import { useApp } from './store'
 import { DeviceSidebar } from './components/DeviceSidebar'
 import { MirrorView } from './components/MirrorView'
@@ -21,10 +21,11 @@ interface Toast {
 }
 
 export default function App(): JSX.Element {
-  const { devices, sessions, settings, activeKeymap, startSession, stopSession, updateSettings } = useApp()
+  const { devices, sessions, settings, activeKeymap, keymaps, startSession, stopSession, updateSettings, updateKeymaps, setActiveKeymapId } = useApp()
   const [activeSerial, setActiveSerial] = useState<string | null>(null)
   const [embedSerial, setEmbedSerial] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
+  const [keymapEditing, setKeymapEditing] = useState(false)
   const [connectOpen, setConnectOpen] = useState(false)
   const [clipboardOpen, setClipboardOpen] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -174,6 +175,31 @@ export default function App(): JSX.Element {
     }
   }
 
+  const handleKeymapChange = useCallback(
+    (k: KeymapConfig) => {
+      const next = keymaps.map((c) => (c.id === k.id ? k : c))
+      void updateKeymaps(next)
+      // If no active keymap, auto-activate the edited one.
+      if (!settings.activeKeymapId && k.bindings.length > 0) {
+        void setActiveKeymapId(k.id)
+      }
+    },
+    [keymaps, settings.activeKeymapId, updateKeymaps, setActiveKeymapId]
+  )
+
+  const handleToggleKeymapEdit = useCallback(() => {
+    setKeymapEditing((v) => {
+      if (v) return false
+      // If no active keymap, auto create one so the visual editor has something to edit.
+      if (!activeKeymap) {
+        const newMap: KeymapConfig = { id: `km${Date.now().toString(36)}`, name: '默认方案', bindings: [], overlays: [] }
+        void updateKeymaps([...keymaps, newMap])
+        void setActiveKeymapId(newMap.id)
+      }
+      return true
+    })
+  }, [activeKeymap, keymaps, updateKeymaps, setActiveKeymapId])
+
   const toggleGroupControl = (): void => {
     const next = !settings.groupControl
     void updateSettings({ ...settings, groupControl: next })
@@ -198,6 +224,7 @@ export default function App(): JSX.Element {
           fullscreen={fullscreen}
           embedActive={embedSerial === activeSession?.serial}
           infoActive={statsOpen}
+          keymapEditing={keymapEditing}
           send={send}
           onToggleGroupControl={toggleGroupControl}
           onToggleFullscreen={() => setFullscreen((f) => !f)}
@@ -207,6 +234,7 @@ export default function App(): JSX.Element {
           onToggleRecord={() => void handleToggleRecord()}
           onOpenClipboard={() => setClipboardOpen(true)}
           onOpenKeymap={() => setPanel('keymap')}
+          onToggleKeymapEdit={handleToggleKeymapEdit}
           onOpenTools={() => setPanel('tools')}
           onOpenSettings={() => setPanel('settings')}
           onStop={() => void handleStop()}
@@ -217,7 +245,18 @@ export default function App(): JSX.Element {
             embedSerial === activeSession.serial ? (
               <EmbeddedScrcpy serial={activeSession.serial} onError={(m) => showToast(m, 'error')} />
             ) : (
-              <MirrorView session={activeSession} send={send} onError={(m) => showToast(m, 'error')} onFullscreen={() => setFullscreen((f) => !f)} decoderAcceleration={settings.decoderAcceleration} onStats={handleRenderStats} keymap={activeKeymap} />
+              <MirrorView
+              session={activeSession}
+              send={send}
+              onError={(m) => showToast(m, 'error')}
+              onFullscreen={() => setFullscreen((f) => !f)}
+              decoderAcceleration={settings.decoderAcceleration}
+              onStats={handleRenderStats}
+              keymap={activeKeymap}
+              editing={keymapEditing}
+              onEditClose={() => setKeymapEditing(false)}
+              onKeymapChange={handleKeymapChange}
+            />
             )
           ) : (
             <div className="empty-state">
@@ -242,7 +281,7 @@ export default function App(): JSX.Element {
       )}
 
       {panel === 'settings' && <SettingsPanel onClose={() => setPanel(null)} />}
-      {panel === 'keymap' && <KeymapPanel onClose={() => setPanel(null)} />}
+      {panel === 'keymap' && <KeymapPanel onClose={() => setPanel(null)} onOpenVisualEditor={handleToggleKeymapEdit} />}
       {panel === 'tools' && <ToolsPanel serial={activeSession?.serial ?? null} onClose={() => setPanel(null)} />}
       {connectOpen && <ConnectDialog onClose={() => setConnectOpen(false)} />}
       {clipboardOpen && activeSession && <ClipboardDialog send={send} onClose={() => setClipboardOpen(false)} />}

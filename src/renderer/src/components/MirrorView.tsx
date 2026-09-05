@@ -4,6 +4,7 @@ import { H264Player } from '../decoder/h264'
 import type { DecoderAcceleration } from '../decoder/h264'
 import { KEYCODE, META, BUTTON, keycodeFromEventCode } from '../keycodes'
 import type { SessionInfo } from '../store'
+import { KeymapEditor } from './KeymapEditor'
 
 interface Props {
   session: SessionInfo | null
@@ -14,6 +15,11 @@ interface Props {
   onStats?: (s: { renderFps: number; hardware: boolean }) => void
   /** active keymap; null = no keymap (fallback to raw Android keycode mapping) */
   keymap: KeymapConfig | null
+  /** whether the visual keymap editor is open over the video */
+  editing?: boolean
+  /** called when the editor requests to close (save or cancel) */
+  onEditClose?: () => void
+  onKeymapChange?: (k: KeymapConfig) => void
 }
 
 /**
@@ -23,7 +29,19 @@ interface Props {
  * When a `keymap` is provided, keyboard events are dispatched through the
  * matching binding. Unbound keys fall back to the default Android keycode mapping.
  */
-export function MirrorView({ session, send, onError, onFullscreen, decoderAcceleration, onStats, keymap }: Props): JSX.Element {
+export function MirrorView({
+  session,
+  send,
+  onError,
+  onFullscreen,
+  decoderAcceleration,
+  onStats,
+  keymap,
+  editing,
+  onEditClose,
+  onKeymapChange
+}: Props): JSX.Element {
+  const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const playerRef = useRef<H264Player | null>(null)
   const mouseDownRef = useRef(false)
@@ -354,7 +372,7 @@ export function MirrorView({ session, send, onError, onFullscreen, decoderAccele
   const onContextMenu = (e: React.MouseEvent): void => e.preventDefault()
 
   return (
-    <div className="mirror-wrap">
+    <div className="mirror-wrap" ref={wrapRef}>
       <canvas
         ref={canvasRef}
         className="mirror-canvas"
@@ -367,6 +385,15 @@ export function MirrorView({ session, send, onError, onFullscreen, decoderAccele
         onDoubleClick={onFullscreen}
       />
       {keymap && keymap.overlays.length > 0 && <KeymapOverlayLayer keymap={keymap} />}
+      {editing && keymap && onKeymapChange && (
+        <KeymapEditor
+          keymap={keymap}
+          containerRef={wrapRef}
+          videoRef={canvasRef}
+          onChange={onKeymapChange}
+          onClose={onEditClose ?? (() => { /* noop */ })}
+        />
+      )}
     </div>
   )
 }

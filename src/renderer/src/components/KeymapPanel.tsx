@@ -6,6 +6,7 @@ import { IconPlus, IconClose } from './icons'
 
 interface Props {
   onClose: () => void
+  onOpenVisualEditor?: () => void
 }
 
 const emptyBinding = (key: string): KeymapBinding => ({
@@ -20,7 +21,8 @@ const emptyBinding = (key: string): KeymapBinding => ({
   viewDy: 0,
   repeatMs: 100,
   keycode: 0,
-  label: ''
+  label: '',
+  groupId: null
 })
 
 const emptyOverlay = (): KeymapOverlay => ({
@@ -64,7 +66,7 @@ const PRESETS: { label: string; key: string; action: KeymapBinding['action']; x:
   { label: 'Shift 扳机', key: 'ShiftLeft', action: 'tap', x: 0.6, y: 0.88 }
 ]
 
-export function KeymapPanel({ onClose }: { onClose: () => void }): JSX.Element {
+export function KeymapPanel({ onClose, onOpenVisualEditor }: Props): JSX.Element {
   const { keymaps, updateKeymaps, settings, setActiveKeymapId } = useApp()
   const [configs, setConfigs] = useState<KeymapConfig[]>(keymaps)
   const [activeId, setActiveId] = useState<string | null>(settings.activeKeymapId)
@@ -426,6 +428,17 @@ export function KeymapPanel({ onClose }: { onClose: () => void }): JSX.Element {
         <button className="btn btn-ghost" onClick={addConfig}>
           <IconPlus width={16} height={16} /> 新建方案
         </button>
+        {onOpenVisualEditor && (
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              save()
+              onOpenVisualEditor()
+            }}
+          >
+            可视化编辑
+          </button>
+        )}
         <button className="btn btn-primary" onClick={save}>
           保存映射
         </button>

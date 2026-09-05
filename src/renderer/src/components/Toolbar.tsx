@@ -27,6 +27,7 @@ interface Props {
   fullscreen: boolean
   embedActive: boolean
   infoActive: boolean
+  keymapEditing: boolean
   send: (cmd: ControlCommand) => void
   onToggleGroupControl: () => void
   onToggleFullscreen: () => void
@@ -36,6 +37,7 @@ interface Props {
   onToggleRecord: () => void
   onOpenClipboard: () => void
   onOpenKeymap: () => void
+  onToggleKeymapEdit: () => void
   onOpenTools: () => void
   onOpenSettings: () => void
   onStop: () => void
@@ -136,6 +138,14 @@ export function Toolbar(p: Props): JSX.Element {
 
       <button className="icon-btn" title="按键映射" onClick={p.onOpenKeymap}>
         <IconKeyboard width={19} height={19} />
+      </button>
+      <button
+        className={`icon-btn ${p.keymapEditing ? 'start' : ''}`}
+        title={p.keymapEditing ? '关闭可视化按键编辑' : '可视化编辑按键映射'}
+        onClick={p.onToggleKeymapEdit}
+      >
+        <IconKeyboard width={19} height={19} />
+        <span style={{ fontSize: 9, position: 'absolute', bottom: 2, right: 2 }}>✎</span>
       </button>
       <button className="icon-btn" title="终端 / 文件" onClick={p.onOpenTools}>
         <IconTerminal width={19} height={19} />

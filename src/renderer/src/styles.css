@@ -946,3 +946,276 @@ textarea {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* ===== Keymap visual editor ===== */
+.keymap-editor {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+}
+
+.keymap-editor-proxy {
+  position: absolute;
+  z-index: 21;
+}
+
+.keymap-editor-cursor-hint {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 30;
+}
+
+/* WASD pad */
+.keymap-editor-wasd {
+  position: absolute;
+  width: 0;
+  height: 0;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.keymap-editor-wasd:active {
+  cursor: grabbing;
+}
+
+.wasd-ring {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12vw;
+  height: 12vw;
+  max-width: 90px;
+  max-height: 90px;
+  min-width: 60px;
+  min-height: 60px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px solid rgba(100, 200, 255, 0.7);
+  background: rgba(30, 40, 55, 0.65);
+  box-shadow: 0 0 12px rgba(100, 200, 255, 0.25);
+}
+
+.wasd-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.wasd-key {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  user-select: none;
+}
+
+/* Single binding control */
+.keymap-editor-control {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  min-width: 48px;
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.6);
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+  color: #fff;
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.keymap-editor-control:active {
+  cursor: grabbing;
+}
+
+.keymap-editor-control .control-label {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 6px;
+  user-select: none;
+}
+
+.keymap-editor-control .control-actions {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 4px;
+  display: flex;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.85);
+  padding: 4px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  pointer-events: auto;
+  white-space: nowrap;
+}
+
+.keymap-editor-control:hover .control-actions,
+.keymap-editor-control:focus-within .control-actions {
+  opacity: 1;
+}
+
+.keymap-editor-control .control-actions select,
+.keymap-editor-control .control-actions input {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 2px 4px;
+  width: auto;
+}
+
+/* Overlay in editor */
+.keymap-editor-overlay {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: grab;
+  pointer-events: auto;
+}
+
+.keymap-editor-overlay:active {
+  cursor: grabbing;
+}
+
+.keymap-editor-overlay .keymap-editor-del {
+  top: -10px;
+  right: -10px;
+}
+
+/* Delete button on controls */
+.keymap-editor-del {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(220, 60, 60, 0.9);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  pointer-events: auto;
+}
+
+.keymap-editor-del:hover {
+  background: rgba(255, 80, 80, 1);
+}
+
+/* Palette */
+.keymap-editor-palette {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 40;
+  background: rgba(20, 24, 35, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 10px;
+  pointer-events: auto;
+  backdrop-filter: blur(6px);
+  min-width: 110px;
+}
+
+.palette-title {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  text-align: center;
+}
+
+.palette-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.palette-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.palette-item:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.palette-item.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.palette-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.palette-label {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* Editor actions */
+.keymap-editor-actions {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  z-index: 40;
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+}

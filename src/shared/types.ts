@@ -161,6 +161,8 @@ export interface KeymapBinding {
   keycode: number
   /** optional human-readable label shown on the canvas overlay */
   label: string
+  /** compound control group id; WASD pad shares one groupId */
+  groupId: string | null
 }
 
 export interface KeymapConfig {
