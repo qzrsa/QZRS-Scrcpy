@@ -142,6 +142,19 @@ export function MirrorView({
   }, [session?.sessionId])
 
   /**
+   * Compute the stick center (normalized) from a group of bindings.
+   * For a classic WASD pad, this is the geometric center of the 4 keys.
+   */
+  const computeGroupCenter = useCallback((groupId: string): { x: number; y: number } => {
+    const km = keymapRef.current
+    const groupBindings = km ? km.bindings.filter((b) => b.groupId === groupId) : []
+    if (groupBindings.length === 0) return { x: 0.5, y: 0.5 }
+    const x = groupBindings.reduce((s, b) => s + b.x, 0) / groupBindings.length
+    const y = groupBindings.reduce((s, b) => s + b.y, 0) / groupBindings.length
+    return { x, y }
+  }, [])
+
+  /**
    * Dispatch a keydown through the active keymap.
    * Returns true if the key was handled by a binding.
    */
@@ -151,7 +164,52 @@ export function MirrorView({
     if (st) return true // already active
 
     const px = normToVideo(binding.x, binding.y)
-    // 每个 binding 使用独立的 synthetic pointerId；之前按坐标生成会导致 WASD 互相冲突
+
+    // Group bindings (e.g. WASD stick): share one pointerId and one center point.
+    // First key = pointer DOWN at center then MOVE to direction. Subsequent key = MOVE to new direction.
+    if (binding.groupId) {
+      let groupState: BindingState | undefined
+      for (const s of bindingStateRef.current.values()) {
+        if (s.groupId === binding.groupId) {
+          groupState = s
+          break
+        }
+      }
+
+      let pid: number
+      let centerX: number
+      let centerY: number
+      if (groupState) {
+        pid = groupState.pointerId as number
+        centerX = groupState.centerX ?? binding.x
+        centerY = groupState.centerY ?? binding.y
+      } else {
+        const center = computeGroupCenter(binding.groupId)
+        centerX = center.x
+        centerY = center.y
+        pid = nextPointerIdRef.current
+        nextPointerIdRef.current -= 1
+      }
+
+      const center = normToVideo(centerX, centerY)
+      if (!groupState) {
+        touch(0, center.x, center.y, px.w, px.h, pid, 0, 1)
+        touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
+      } else {
+        touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
+      }
+      bindingStateRef.current.set(stateKey, {
+        pointerId: pid,
+        curX: px.x,
+        curY: px.y,
+        groupId: binding.groupId,
+        centerX,
+        centerY
+      })
+      return true
+    }
+
+    // Non-group bindings use an independent pointerId.
     const pid = nextPointerIdRef.current
     nextPointerIdRef.current -= 1
     const newSt: BindingState = { pointerId: pid, curX: px.x, curY: px.y }
@@ -252,6 +310,26 @@ export function MirrorView({
     const st = bindingStateRef.current.get(stateKey)
     if (!st) return
     cancelBindingTimers(stateKey)
+
+    // Group stick: if any sibling is still pressed, move to its direction; otherwise lift at center.
+    if (binding.groupId) {
+      let other: BindingState | undefined
+      for (const [k, s] of bindingStateRef.current.entries()) {
+        if (k !== stateKey && s.groupId === binding.groupId) {
+          other = s
+          break
+        }
+      }
+      const base = normToVideo(binding.x, binding.y)
+      if (other) {
+        touch(2, other.curX, other.curY, base.w, base.h, st.pointerId, 0, 1)
+      } else {
+        const center = normToVideo(st.centerX ?? binding.x, st.centerY ?? binding.y)
+        touch(1, center.x, center.y, base.w, base.h, st.pointerId, 0, 0)
+      }
+      return
+    }
+
     const px = normToVideo(binding.x, binding.y)
     touch(1, st.curX, st.curY, px.w, px.h, st.pointerId, 0, 0)
   }
@@ -424,6 +502,11 @@ interface BindingState {
   curY: number
   /** view action: tick counter for accumulating viewDx/viewDy offset */
   tickN?: number
+  /** group binding (e.g. WASD stick): shared pointerId with siblings */
+  groupId?: string | null
+  /** stick center in normalized coords, used only by group bindings */
+  centerX?: number
+  centerY?: number
 }
 
 /**
