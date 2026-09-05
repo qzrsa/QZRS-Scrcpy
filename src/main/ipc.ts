@@ -383,21 +383,27 @@ export function registerIpc(store: Store): AppManager {
   // ---- fullscreen ----
   ipcMain.handle('fullscreen:enter', async () => {
     const win = getWin()
-    if (!win || win.isDestroyed()) return { ok: false }
+    if (!win || win.isDestroyed()) return { ok: false, error: 'no window' }
     try {
+      log(`enterFullscreen: fullscreenable=${win.isFullScreenable()}, current=${win.isFullScreen()}`)
       win.setFullScreen(true)
+      log(`enterFullscreen: done, now=${win.isFullScreen()}`)
       return { ok: true }
     } catch (err) {
+      log(`enterFullscreen error: ${err}`)
       return { ok: false, error: String(err) }
     }
   })
   ipcMain.handle('fullscreen:exit', async () => {
     const win = getWin()
-    if (!win || win.isDestroyed()) return { ok: false }
+    if (!win || win.isDestroyed()) return { ok: false, error: 'no window' }
     try {
+      log(`exitFullscreen: current=${win.isFullScreen()}`)
       win.setFullScreen(false)
+      log(`exitFullscreen: done`)
       return { ok: true }
     } catch (err) {
+      log(`exitFullscreen error: ${err}`)
       return { ok: false, error: String(err) }
     }
   })

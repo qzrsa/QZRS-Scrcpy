@@ -19,6 +19,7 @@ function createWindow(): void {
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
+    fullscreenable: true,
     title: 'QZRS Scrcpy',
     backgroundColor: '#0f1115',
     webPreferences: {
