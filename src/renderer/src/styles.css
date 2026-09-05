@@ -1375,34 +1375,19 @@ textarea {
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.1);
 }
 
-/* Hover effect: show icon symbols using ::after */
-.titlebar-btn::after {
-  content: '';
-  display: none;
+/* Hover: slight background darkening, no symbols */
+.titlebar-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
 }
 
-.titlebar-btn.close::after {
-  content: '×';
-  font-size: 14px;
-  color: #fff;
+.titlebar-btn.close:hover {
+  background: #e81123;
 }
 
-.titlebar-btn.minimize::after {
-  content: '—';
-  font-size: 16px;
-  color: rgba(0, 0, 0, 0.6);
+.titlebar-btn:active {
+  background: rgba(0, 0, 0, 0.2);
 }
 
-.titlebar-btn.maximize::after {
-  content: '□';
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.6);
-}
-
-.titlebar-btn:hover::before {
-  display: none;
-}
-
-.titlebar-btn:hover::after {
-  display: block;
+.titlebar-btn.close:active {
+  background: #c4000e;
 }
