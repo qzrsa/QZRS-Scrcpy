@@ -53,8 +53,11 @@ export function MirrorView({
   /** mirror of the active keymap, kept in a ref so the keydown handler always reads the latest */
   const keymapRef = useRef<KeymapConfig | null>(keymap)
   keymapRef.current = keymap
-  /** debug state: last key event + canvas size, surfaced via a small overlay */
-  const [debugInfo, setDebugInfo] = useState<string>('')
+  /** debug state: rolling log of the last key events / touch commands sent */
+  const [debugLines, setDebugLines] = useState<string[]>([])
+  const pushDebug = useCallback((line: string): void => {
+    setDebugLines((prev) => [...prev, line].slice(-6))
+  }, [])
 
   // (Re)create the decoder whenever the active session changes.
   useEffect(() => {
@@ -111,8 +114,8 @@ export function MirrorView({
   const touch = (action: MotionEventAction, x: number, y: number, w: number, h: number, pid: 'mouse' | 'finger' | number, buttons = 0, pressure = 1): void => {
     send({ type: 'touch', action, pointerId: pid, x, y, width: w, height: h, pressure, buttons })
     // debug surface
-    const actionName = ['DOWN', 'UP', 'MOVE', '...', 'POINTER_UP', 'POINTER_DOWN', 'HOVER_MOVE', 'HOVER_ENTER', 'HOVER_EXIT'][action] ?? String(action)
-    setDebugInfo(`touch ${actionName} (${x.toFixed(0)},${y.toFixed(0)}) pid=${pid} w=${w} h=${h}`)
+    const actionName = ['DOWN', 'UP', 'MOVE', 'CANCEL', 'OUTSIDE', 'POINTER_DOWN', 'POINTER_UP', 'HOVER_MOVE'][action] ?? String(action)
+    pushDebug(`touch ${actionName} (${x.toFixed(0)},${y.toFixed(0)}) pid=${pid}`)
   }
 
   /** Send an Android keycode event. */
@@ -195,14 +198,7 @@ export function MirrorView({
         nextPointerIdRef.current -= 1
       }
 
-      if (!groupState) {
-        // First key in group: DOWN directly at the direction point.
-        touch(0, px.x, px.y, px.w, px.h, pid, 0, 1)
-      } else {
-        // Another direction already pressed: MOVE to new direction.
-        touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
-      }
-
+      const center = normToVideo(centerX, centerY)
       const newSt: BindingState = {
         pointerId: pid,
         curX: px.x,
@@ -211,14 +207,43 @@ export function MirrorView({
         centerX,
         centerY
       }
-      // Emit a periodic MOVE so the game keeps registering the finger as held at this
-      // direction. Without this, only the initial MOVE is sent and some game stick UIs
-      // treat the press as "released" once MOVE stops arriving.
-      newSt.tickTimer = window.setInterval(() => {
-        const cur = bindingStateRef.current.get(stateKey)
-        if (!cur) return
-        touch(2, cur.curX, cur.curY, px.w, px.h, pid, 0, 1)
-      }, 50)
+
+      if (!groupState) {
+        // 真实手指行为：先 DOWN 在摇杆中心点，再分 5 步（每步 16ms，共 80ms）
+        // 平滑滑到方向偏移点，之后每 50ms 持续 MOVE 保持手指"按住不松"的状态。
+        touch(0, center.x, center.y, px.w, px.h, pid, 0, 1)
+        let step = 0
+        const totalSteps = 5
+        const rampTimer = window.setInterval(() => {
+          step += 1
+          const t = Math.min(1, step / totalSteps)
+          const cx = center.x + (px.x - center.x) * t
+          const cy = center.y + (px.y - center.y) * t
+          touch(2, cx, cy, px.w, px.h, pid, 0, 1)
+          if (t >= 1) {
+            window.clearInterval(rampTimer)
+            const cur = bindingStateRef.current.get(stateKey)
+            if (cur) {
+              cur.autoTimer = undefined
+              cur.tickTimer = window.setInterval(() => {
+                const c = bindingStateRef.current.get(stateKey)
+                if (!c) return
+                touch(2, c.curX, c.curY, px.w, px.h, pid, 0, 1)
+              }, 50)
+            }
+          }
+        }, 16)
+        newSt.autoTimer = rampTimer
+      } else {
+        // 已有方向键按住中：复用同一 pointerId 直接 MOVE 到新方向，并保持。
+        touch(2, px.x, px.y, px.w, px.h, pid, 0, 1)
+        newSt.tickTimer = window.setInterval(() => {
+          const cur = bindingStateRef.current.get(stateKey)
+          if (!cur) return
+          touch(2, cur.curX, cur.curY, px.w, px.h, pid, 0, 1)
+        }, 50)
+      }
+
       bindingStateRef.current.set(stateKey, newSt)
       return true
     }
@@ -364,14 +389,16 @@ export function MirrorView({
         const csize = canvas ? `${canvas.width}x${canvas.height}` : 'no-canvas'
         if (matches.length > 0) {
           e.preventDefault()
-          setDebugInfo(`hit ${e.code} → ${matches.length} match(es); canvas=${csize}; first binding action=${matches[0].action} x=${matches[0].x.toFixed(2)} y=${matches[0].y.toFixed(2)}`)
+          const b0 = matches[0]
+          const gid = b0.groupId ? ` group=${b0.groupId.slice(-4)}` : ''
+          pushDebug(`HIT ${e.code} → ${b0.action}${gid} @ (${b0.x.toFixed(2)},${b0.y.toFixed(2)}) canvas=${csize}`)
           for (const b of matches) dispatchKeymapDown(b)
           return
         } else {
-          setDebugInfo(`keydown ${e.code} | keymap=${km.name} (${km.bindings.length} bindings); no match | canvas=${csize}; first binding keys=${km.bindings.slice(0, 3).map((b) => `'${b.key}'→'${normalizeKeyCode(b.key)}'`).join(',')}`)
+          pushDebug(`keydown ${e.code} | no match | ${km.name}(${km.bindings.length}) keys=${km.bindings.map((b) => normalizeKeyCode(b.key)).join(',')}`)
         }
       } else {
-        setDebugInfo(`keydown ${e.code} | NO ACTIVE KEYMAP (check KeymapPanel "激活" radio + 保存映射)`)
+        pushDebug(`keydown ${e.code} | NO ACTIVE KEYMAP (勾选「激活」并保存映射)`)
       }
 
       // No keymap or no matching binding → fall back to raw Android keycode mapping.
@@ -501,8 +528,12 @@ export function MirrorView({
           onClose={onEditClose ?? (() => { /* noop */ })}
         />
       )}
-      {debugInfo && (
-        <div className="mirror-debug-overlay">{debugInfo}</div>
+      {debugLines.length > 0 && (
+        <div className="mirror-debug-overlay">
+          {debugLines.map((l, i) => (
+            <div key={i}>{l}</div>
+          ))}
+        </div>
       )}
     </div>
   )
