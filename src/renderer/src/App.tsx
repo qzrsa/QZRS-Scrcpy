@@ -232,9 +232,9 @@ export default function App(): JSX.Element {
       <div className="window-titlebar">
         <div className="titlebar-drag-region" />
         <div className="titlebar-buttons">
-          <button className="titlebar-btn close" title="关闭 (Alt+F4)" onClick={() => void window.api.closeWindow()} />
           <button className="titlebar-btn minimize" title="最小化" onClick={() => void window.api.minimizeWindow()} />
           <button className="titlebar-btn maximize" title="最大化" onClick={() => void window.api.maximizeWindow()} />
+          <button className="titlebar-btn close" title="关闭 (Alt+F4)" onClick={() => void window.api.closeWindow()} />
         </div>
       </div>
       <DeviceSidebar
