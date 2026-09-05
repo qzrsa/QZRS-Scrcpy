@@ -305,9 +305,20 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
     }
   }, [dragging, toNorm])
 
-  /** Record a key for the binding whose id matches `recordingId`. */
+  /** Record a key/mouse button for the binding whose id matches `recordingId`. */
   useEffect(() => {
     if (recordingId === null) return
+
+    const LABEL = (e: MouseEvent | KeyboardEvent): string => {
+      if (e instanceof MouseEvent) {
+        if (e.button === 2) return 'MouseRight'
+        if (e.button === 1) return 'MouseMiddle'
+        if (e.button === 0) return 'MouseLeft'
+        return `Mouse${e.button}`
+      }
+      return normalizeKeyCode((e as KeyboardEvent).code)
+    }
+
     const onKey = (e: KeyboardEvent): void => {
       // ESC cancels recording without consuming the key
       if (e.key === 'Escape') {
@@ -317,15 +328,27 @@ export function KeymapEditor({ keymap, containerRef, videoRef, onChange, onClose
       }
       e.preventDefault()
       e.stopPropagation()
-      const newKey = normalizeKeyCode(e.code)
       setDraft((prev) => ({
         ...prev,
-        bindings: prev.bindings.map((b) => (bindingKey(b) === recordingId ? { ...b, key: newKey } : b))
+        bindings: prev.bindings.map((b) => (bindingKey(b) === recordingId ? { ...b, key: LABEL(e) } : b))
+      }))
+      setRecordingId(null)
+    }
+    const onMouse = (e: MouseEvent): void => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDraft((prev) => ({
+        ...prev,
+        bindings: prev.bindings.map((b) => (bindingKey(b) === recordingId ? { ...b, key: LABEL(e) } : b))
       }))
       setRecordingId(null)
     }
     window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
+    window.addEventListener('mousedown', onMouse, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      window.removeEventListener('mousedown', onMouse, true)
+    }
   }, [recordingId])
 
   /** Group bindings by groupId; WASD pad is one visual group. */
