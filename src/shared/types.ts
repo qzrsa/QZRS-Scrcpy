@@ -123,6 +123,9 @@ export interface AppSettings {
   groupControl: boolean
   /** id of the active keymap; null = no keymap active (every key → Android keycode) */
   activeKeymapId: string | null
+  /** fullscreen mode: 'overlay' = CSS overlay (sidebar+toolbar hidden, window stays);
+   *  'window' = system-level fullscreen (requestFullscreen) or maximize via IPC. */
+  fullscreenMode: 'overlay' | 'window'
 }
 
 /**

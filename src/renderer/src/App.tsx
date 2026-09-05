@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { ControlCommand, KeymapConfig, SessionStats } from '@shared/types'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ControlCommand, KeymapConfig, SessionStats, AppSettings } from '@shared/types'
 import { useApp } from './store'
 import { DeviceSidebar } from './components/DeviceSidebar'
 import { MirrorView } from './components/MirrorView'
@@ -80,14 +80,32 @@ export default function App(): JSX.Element {
   }, [activeSession?.sessionId])
 
   // ESC exits fullscreen; F12 toggles fullscreen.
+  // Uses system-level fullscreen when settings.fullscreenMode === 'window'.
+  const settingsRef = useRef<AppSettings>(settings)
+  settingsRef.current = settings
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setFullscreen(false)
-      else if (e.key === 'F12') { e.preventDefault(); setFullscreen((f) => !f) }
+      if (e.key === 'Escape') {
+        setFullscreen(false)
+        if (settingsRef.current.fullscreenMode === 'window') {
+          window.api.exitFullscreen().catch(() => { /* ignore */ })
+        }
+        return
+      }
+      if (e.key === 'F12') {
+        e.preventDefault()
+        const next = !fullscreen
+        setFullscreen(next)
+        if (settingsRef.current.fullscreenMode === 'window') {
+          if (next) window.api.enterFullscreen().catch(() => { /* ignore */ })
+          else window.api.exitFullscreen().catch(() => { /* ignore */ })
+        }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [fullscreen])
 
   const handleRenderStats = useCallback((s: { renderFps: number; hardware: boolean }) => setRenderStats(s), [])
   const toggleInfo = useCallback(() => setStatsOpen((v) => !v), [])

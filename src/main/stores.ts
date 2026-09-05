@@ -11,6 +11,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   decoderAcceleration: 'auto',
   groupControl: false,
   activeKeymapId: null,
+  fullscreenMode: 'overlay' as const,
   session: {
     bitRate: 8000000,
     maxFps: 0,

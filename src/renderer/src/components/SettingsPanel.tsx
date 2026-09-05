@@ -196,6 +196,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         <Toggle checked={draft.session.control} onChange={(v) => patchSession({ control: v })} />
       </div>
 
+      <div className="field">
+        <label>全屏模式</label>
+        <select
+          className="select"
+          value={draft.fullscreenMode}
+          onChange={(e) => patch({ fullscreenMode: e.target.value as AppSettings['fullscreenMode'] })}
+        >
+          <option value="overlay">覆盖层（仅隐藏侧边栏和工具栏）</option>
+          <option value="window">系统级全屏（F12 进入独占全屏）</option>
+        </select>
+        <div className="hint">覆盖层：适合投屏小窗；系统级全屏：按 F12 让窗口独占整个显示器（含任务栏消失）</div>
+      </div>
+
       <div className="row" style={{ marginTop: 20 }}>
         <button className="btn btn-primary btn-block" onClick={save}>
           保存设置

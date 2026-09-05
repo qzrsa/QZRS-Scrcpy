@@ -48,6 +48,10 @@ const api = {
 
   getSettings: (): Promise<AppSettings> => ipcRenderer.invoke('settings:get'),
   setSettings: (s: AppSettings): Promise<void> => ipcRenderer.invoke('settings:set', s),
+  enterFullscreen: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('fullscreen:enter'),
+  exitFullscreen: (): Promise<{ ok: boolean; error?: string }> =>
+    ipcRenderer.invoke('fullscreen:exit'),
   resolvePaths: (): Promise<{ adbPath: string; serverPath: string; scrcpyPath: string }> =>
     ipcRenderer.invoke('settings:resolvePaths'),
   resolveScrcpy: (): Promise<string> => ipcRenderer.invoke('external-scrcpy:resolve'),

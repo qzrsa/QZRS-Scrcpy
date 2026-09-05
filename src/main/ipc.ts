@@ -380,6 +380,28 @@ export function registerIpc(store: Store): AppManager {
   ipcMain.handle('keymaps:get', () => store.getKeymaps())
   ipcMain.handle('keymaps:set', (_e, k: KeymapConfig[]) => store.setKeymaps(k))
 
+  // ---- fullscreen ----
+  ipcMain.handle('fullscreen:enter', async () => {
+    const win = getWin()
+    if (!win || win.isDestroyed()) return { ok: false }
+    try {
+      win.setFullScreen(true)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
+  })
+  ipcMain.handle('fullscreen:exit', async () => {
+    const win = getWin()
+    if (!win || win.isDestroyed()) return { ok: false }
+    try {
+      win.setFullScreen(false)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: String(err) }
+    }
+  })
+
   ipcMain.on('clipboard:write', (_e, text: string) => {
     clipboard.writeText(text)
   })
