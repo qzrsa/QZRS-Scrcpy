@@ -25,14 +25,12 @@ interface Props {
   groupControl: boolean
   recording: boolean
   fullscreen: boolean
-  embedActive: boolean
   infoActive: boolean
   keymapEditing: boolean
   debugActive: boolean
   send: (cmd: ControlCommand) => void
   onToggleGroupControl: () => void
   onToggleFullscreen: () => void
-  onToggleEmbed: () => void
   onToggleInfo: () => void
   onScreenshot: () => void
   onToggleRecord: () => void
@@ -116,15 +114,6 @@ export function Toolbar(p: Props): JSX.Element {
         onClick={p.onToggleGroupControl}
       >
         <IconLayers width={19} height={19} />
-      </button>
-
-      <button
-        className={`icon-btn ${p.embedActive ? 'start' : ''}`}
-        disabled={disabled}
-        title={p.embedActive ? '已启用 Scrcpy 嵌入（点击切回内置渲染）' : '用 Scrcpy 嵌入渲染（内置渲染异常时）'}
-        onClick={p.onToggleEmbed}
-      >
-        <IconRotate width={19} height={19} />
       </button>
 
       <button

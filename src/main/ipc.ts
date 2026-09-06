@@ -6,14 +6,6 @@ import { AdbClient } from './adb'
 import { ScrcpySession } from './session'
 import { Store } from './stores'
 import { findAdb, findServer, findScrcpy } from './util'
-import {
-  launchEmbeddedScrcpy,
-  moveScrcpy,
-  stopScrcpy,
-  stopAllScrcpy,
-  hwndFromBuffer,
-  type EmbedRect
-} from './scrcpyEmbed'
 import type {
   DeviceInfo,
   SessionOptions,
@@ -305,26 +297,6 @@ export function registerIpc(store: Store): AppManager {
     return findScrcpy(settings.scrcpyPath) ?? ''
   })
 
-  // ---- embedded scrcpy (Win32 SetParent) ----
-  // 把 scrcpy.exe 的 SDL 窗口嵌入到当前 Electron 主窗口内，作为内置渲染的回退方案。
-  ipcMain.handle('scrcpy-embed:launch', async (_e, serial: string) => {
-    const win = getWin()
-    if (!win) return { ok: false, message: '主窗口不存在' }
-    const settings = store.getSettings()
-    const exe = findScrcpy(settings.scrcpyPath)
-    if (!exe) {
-      return { ok: false, message: '未找到 scrcpy.exe，请在设置里指定路径或安装官方 scrcpy' }
-    }
-    const handle = win.getNativeWindowHandle()
-    if (!handle) return { ok: false, message: '无法获取主窗口句柄' }
-    return launchEmbeddedScrcpy(serial, hwndFromBuffer(handle), exe)
-  })
-  ipcMain.on('scrcpy-embed:move', (_e, serial: string, rect: EmbedRect) => {
-    moveScrcpy(serial, rect)
-  })
-  ipcMain.handle('scrcpy-embed:stop', (_e, serial: string) => {
-    stopScrcpy(serial)
-  })
   ipcMain.on('session:control', (_e, sessionId: string, cmd: ControlCommand) => {
     const h = sessions.get(sessionId)
     if (h) h.session.sendControl(cmd)
@@ -539,8 +511,6 @@ export function registerIpc(store: Store): AppManager {
         }
       }
       externalScrcpys.clear()
-      // 关闭所有已嵌入的 scrcpy 子窗口
-      stopAllScrcpy()
       // 停止仍在录屏的设备，避免退出后 screenrecord 进程残留占满存储
       if (adb) {
         for (const [serial, remote] of records) {

@@ -10,7 +10,6 @@ interface Props {
   session: SessionInfo | null
   send: (cmd: ControlCommand) => void
   onError: (message: string) => void
-  onFullscreen: () => void
   decoderAcceleration: DecoderAcceleration
   onStats?: (s: { renderFps: number; hardware: boolean }) => void
   /** active keymap; null = no keymap (fallback to raw Android keycode mapping) */
@@ -35,7 +34,6 @@ export function MirrorView({
   session,
   send,
   onError,
-  onFullscreen,
   decoderAcceleration,
   onStats,
   keymap,

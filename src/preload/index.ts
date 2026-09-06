@@ -57,18 +57,10 @@ const api = {
   closeWindow: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('window:close'),
   resolvePaths: (): Promise<{ adbPath: string; serverPath: string; scrcpyPath: string }> =>
     ipcRenderer.invoke('settings:resolvePaths'),
-  resolveScrcpy: (): Promise<string> => ipcRenderer.invoke('external-scrcpy:resolve'),
   launchExternalScrcpy: (serial: string): Promise<OpResult> =>
     ipcRenderer.invoke('external-scrcpy:launch', serial),
   stopExternalScrcpy: (serial: string): Promise<void> =>
     ipcRenderer.invoke('external-scrcpy:stop', serial),
-  launchEmbeddedScrcpy: (serial: string): Promise<OpResult> =>
-    ipcRenderer.invoke('scrcpy-embed:launch', serial),
-  moveEmbeddedScrcpy: (serial: string, rect: { x: number; y: number; w: number; h: number }): void => {
-    ipcRenderer.send('scrcpy-embed:move', serial, rect)
-  },
-  stopEmbeddedScrcpy: (serial: string): Promise<void> =>
-    ipcRenderer.invoke('scrcpy-embed:stop', serial),
   getKeymaps: (): Promise<KeymapConfig[]> => ipcRenderer.invoke('keymaps:get'),
   setKeymaps: (k: KeymapConfig[]): Promise<void> => ipcRenderer.invoke('keymaps:set', k),
   writeClipboard: (text: string): void => ipcRenderer.send('clipboard:write', text),

@@ -3,7 +3,6 @@ import type { ControlCommand, KeymapConfig, SessionStats, AppSettings } from '@s
 import { useApp } from './store'
 import { DeviceSidebar } from './components/DeviceSidebar'
 import { MirrorView } from './components/MirrorView'
-import { EmbeddedScrcpy } from './components/EmbeddedScrcpy'
 import { Toolbar } from './components/Toolbar'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ConnectDialog } from './components/ConnectDialog'
@@ -23,7 +22,6 @@ interface Toast {
 export default function App(): JSX.Element {
   const { devices, sessions, settings, activeKeymap, keymaps, startSession, stopSession, updateSettings, updateKeymaps, setActiveKeymapId } = useApp()
   const [activeSerial, setActiveSerial] = useState<string | null>(null)
-  const [embedSerial, setEmbedSerial] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
   const [keymapEditing, setKeymapEditing] = useState(false)
   const [debugOverlay, setDebugOverlay] = useState(false)
@@ -141,31 +139,11 @@ export default function App(): JSX.Element {
     if (activeSession) {
       await stopSession(activeSession.sessionId)
       setActiveSerial(null)
-      setEmbedSerial(null)
       setRecording(false)
       setNetStats(null)
       setRenderStats(null)
     }
   }, [activeSession, stopSession])
-
-  // 切换"嵌入 scrcpy"回退模式：内置 WebCodecs 渲染异常（绿屏/竖屏裁切）时，
-  // 用官方 scrcpy.exe 的 SDL 窗口嵌入到 MirrorView 区域看画面。
-  const toggleEmbed = useCallback((): void => {
-    if (!activeSession) return
-    const next = embedSerial === activeSession.serial ? null : activeSession.serial
-    // 先停旧的嵌入（如果切换到新设备）
-    if (next !== null && embedSerial !== null && embedSerial !== activeSession.serial) {
-      void window.api.stopEmbeddedScrcpy(embedSerial)
-    }
-    setEmbedSerial(next)
-  }, [activeSession, embedSerial])
-
-  // 设备切换时自动重置嵌入状态
-  useEffect(() => {
-    if (activeSession && embedSerial !== null && embedSerial !== activeSession.serial) {
-      setEmbedSerial(null)
-    }
-  }, [activeSession?.serial])
 
   const send = useCallback(
     (cmd: ControlCommand): void => {
@@ -269,14 +247,12 @@ export default function App(): JSX.Element {
           groupControl={settings.groupControl}
           recording={recording}
           fullscreen={fullscreen}
-          embedActive={embedSerial === activeSession?.serial}
           infoActive={statsOpen}
           keymapEditing={keymapEditing}
           debugActive={debugOverlay}
           send={send}
           onToggleGroupControl={toggleGroupControl}
           onToggleFullscreen={() => setFullscreen((f) => !f)}
-          onToggleEmbed={toggleEmbed}
           onToggleInfo={toggleInfo}
           onScreenshot={() => void handleScreenshot()}
           onToggleRecord={() => void handleToggleRecord()}
@@ -291,23 +267,18 @@ export default function App(): JSX.Element {
 
         <div className="stage">
           {activeSession ? (
-            embedSerial === activeSession.serial ? (
-              <EmbeddedScrcpy serial={activeSession.serial} onError={(m) => showToast(m, 'error')} />
-            ) : (
-              <MirrorView
-              session={activeSession}
-              send={send}
-              onError={(m) => showToast(m, 'error')}
-              onFullscreen={() => setFullscreen((f) => !f)}
-              decoderAcceleration={settings.decoderAcceleration}
-              onStats={handleRenderStats}
-              keymap={activeKeymap}
-              editing={keymapEditing}
-              debug={debugOverlay}
-              onEditClose={() => setKeymapEditing(false)}
-              onKeymapChange={handleKeymapChange}
-            />
-            )
+            <MirrorView
+            session={activeSession}
+            send={send}
+            onError={(m) => showToast(m, 'error')}
+            decoderAcceleration={settings.decoderAcceleration}
+            onStats={handleRenderStats}
+            keymap={activeKeymap}
+            editing={keymapEditing}
+            debug={debugOverlay}
+            onEditClose={() => setKeymapEditing(false)}
+            onKeymapChange={handleKeymapChange}
+          />
           ) : (
             <div className="empty-state">
               <div className="big-phone">
