@@ -406,6 +406,9 @@ export function MirrorView({
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
       if (!session) return
+      // Skip if focus is on an input/textarea — let native handlers deal with it
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || (e.target as HTMLElement)?.contentEditable === 'true') return
       // track modifiers for metastate
       if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') metaRef.current |= META.SHIFT_ON
       else if (e.code === 'ControlLeft' || e.code === 'ControlRight') metaRef.current |= META.CTRL_ON
