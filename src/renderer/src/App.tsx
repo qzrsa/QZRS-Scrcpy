@@ -152,8 +152,20 @@ export default function App(): JSX.Element {
   // 用官方 scrcpy.exe 的 SDL 窗口嵌入到 MirrorView 区域看画面。
   const toggleEmbed = useCallback((): void => {
     if (!activeSession) return
-    setEmbedSerial((prev) => (prev === activeSession.serial ? null : activeSession.serial))
-  }, [activeSession])
+    const next = embedSerial === activeSession.serial ? null : activeSession.serial
+    // 先停旧的嵌入（如果切换到新设备）
+    if (next !== null && embedSerial !== null && embedSerial !== activeSession.serial) {
+      void window.api.stopEmbeddedScrcpy(embedSerial)
+    }
+    setEmbedSerial(next)
+  }, [activeSession, embedSerial])
+
+  // 设备切换时自动重置嵌入状态
+  useEffect(() => {
+    if (activeSession && embedSerial !== null && embedSerial !== activeSession.serial) {
+      setEmbedSerial(null)
+    }
+  }, [activeSession?.serial])
 
   const send = useCallback(
     (cmd: ControlCommand): void => {

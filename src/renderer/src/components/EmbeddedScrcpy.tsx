@@ -45,7 +45,8 @@ export function EmbeddedScrcpy({ serial, onError }: Props): JSX.Element {
     })()
     return () => {
       alive = false
-      void window.api.stopEmbeddedScrcpy(serial)
+      // 使用 send 而非 invoke，避免等待响应阻塞卸载
+      void window.api.stopEmbeddedScrcpy(serial).catch(() => {})
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serial])
