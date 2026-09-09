@@ -596,7 +596,7 @@ textarea {
 
 .drawer {
   position: fixed;
-  top: 0;
+  top: 38px;
   right: 0;
   bottom: 0;
   width: 400px;
@@ -608,6 +608,11 @@ textarea {
   display: flex;
   flex-direction: column;
   animation: slideIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* 全屏时标题栏隐藏，抽屉顶到最上方 */
+.app.fullscreen .drawer {
+  top: 0;
 }
 
 .drawer.wide {

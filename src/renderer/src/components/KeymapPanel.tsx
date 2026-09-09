@@ -193,11 +193,6 @@ export function KeymapPanel({ onClose, onOpenVisualEditor, onToast }: Props): JS
 
   return (
     <Drawer title="按键映射" wide onClose={onClose}>
-      <p className="hint" style={{ margin: '0 0 12px' }}>
-        把键盘按键映射为屏幕触摸 / 滑动 / Android 按键。坐标用 0~1 归一化值（相对视频画面）。
-        选择「激活」的方案会在 MirrorView 实时生效（未绑定按键仍按默认 Android keycode 处理）。
-      </p>
-
       <div className="keymap-list">
         {configs.map((cfg) => (
           <div className={`keymap-card ${activeId === cfg.id ? 'active' : ''}`} key={cfg.id}>
