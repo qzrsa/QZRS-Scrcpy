@@ -63,6 +63,16 @@ const api = {
     ipcRenderer.invoke('external-scrcpy:stop', serial),
   getKeymaps: (): Promise<KeymapConfig[]> => ipcRenderer.invoke('keymaps:get'),
   setKeymaps: (k: KeymapConfig[]): Promise<void> => ipcRenderer.invoke('keymaps:set', k),
+  exportKeymap: (
+    id: string
+  ): Promise<{ ok: boolean; path?: string; message?: string }> => ipcRenderer.invoke('keymaps:export', id),
+  importKeymap: (): Promise<{
+    ok: boolean
+    keymaps?: KeymapConfig[]
+    added?: number
+    message?: string
+  }> => ipcRenderer.invoke('keymaps:import'),
+  openKeymapsDir: (): Promise<{ ok: boolean; dir?: string }> => ipcRenderer.invoke('keymaps:openDir'),
   writeClipboard: (text: string): void => ipcRenderer.send('clipboard:write', text),
   readClipboard: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
 

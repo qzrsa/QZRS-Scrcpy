@@ -10,5 +10,8 @@ dist/
 .DS_Store
 Thumbs.db
 
+# 按键方案（运行时生成，存于安装目录 keymaps/ 或 userData）
+keymaps/
+
 # AI 生图原始带水印产物（ImageGen 输出，处理后用 icon.png）
 resources/App_icon_*.png

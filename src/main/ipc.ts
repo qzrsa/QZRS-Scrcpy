@@ -1,5 +1,6 @@
-import { ipcMain, dialog, clipboard, app, BrowserWindow, type IpcMainInvokeEvent } from 'electron'
-import { writeFileSync, copyFileSync } from 'node:fs'
+import { ipcMain, dialog, clipboard, app, BrowserWindow, shell, type IpcMainInvokeEvent } from 'electron'
+import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
+import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { AdbClient } from './adb'
@@ -351,6 +352,75 @@ export function registerIpc(store: Store): AppManager {
   })
   ipcMain.handle('keymaps:get', () => store.getKeymaps())
   ipcMain.handle('keymaps:set', (_e, k: KeymapConfig[]) => store.setKeymaps(k))
+
+  // 导出单个方案为 json 文件（默认落在方案文件夹里，文件名取方案名）
+  ipcMain.handle('keymaps:export', async (_e, id: string) => {
+    const cfg = store.getKeymaps().find((c) => c.id === id)
+    if (!cfg) return { ok: false, message: '方案不存在' }
+    const safe = (cfg.name || 'keymap').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60)
+    const win = getWin()
+    const saveOpts: SaveDialogOptions = {
+      title: '导出按键方案',
+      defaultPath: join(store.getKeymapsDir(), `${safe}.json`),
+      filters: [{ name: '按键方案', extensions: ['json'] }]
+    }
+    const res = win ? await dialog.showSaveDialog(win, saveOpts) : await dialog.showSaveDialog(saveOpts)
+    if (res.canceled || !res.filePath) return { ok: false, message: '已取消' }
+    try {
+      writeFileSync(res.filePath, JSON.stringify(cfg, null, 2), 'utf8')
+      return { ok: true, path: res.filePath }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // 从 json 导入方案，兼容单方案文件和方案数组；id/名称冲突自动改名
+  ipcMain.handle('keymaps:import', async () => {
+    const win = getWin()
+    const openOpts: OpenDialogOptions = {
+      title: '导入按键方案',
+      filters: [{ name: '按键方案', extensions: ['json'] }],
+      properties: ['openFile']
+    }
+    const res = win ? await dialog.showOpenDialog(win, openOpts) : await dialog.showOpenDialog(openOpts)
+    if (res.canceled || res.filePaths.length === 0) return { ok: false, message: '已取消' }
+    try {
+      const raw: unknown = JSON.parse(readFileSync(res.filePaths[0], 'utf8'))
+      const incoming = (Array.isArray(raw) ? raw : [raw]) as KeymapConfig[]
+      const list = store.getKeymaps()
+      const ids = new Set(list.map((c) => c.id))
+      const names = new Set(list.map((c) => c.name))
+      const added: KeymapConfig[] = []
+      for (const cfg of incoming) {
+        if (!cfg || typeof cfg !== 'object' || !Array.isArray(cfg.bindings)) continue
+        let id = cfg.id || `km${Date.now().toString(36)}`
+        if (ids.has(id)) id = `km${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`
+        let name = cfg.name || '导入的方案'
+        if (names.has(name)) name = `${name} (导入)`
+        ids.add(id)
+        names.add(name)
+        added.push({
+          ...cfg,
+          id,
+          name,
+          bindings: cfg.bindings,
+          overlays: Array.isArray(cfg.overlays) ? cfg.overlays : []
+        })
+      }
+      if (added.length === 0) return { ok: false, message: '文件中没有有效的按键方案' }
+      const next = [...list, ...added]
+      store.setKeymaps(next)
+      return { ok: true, keymaps: next, added: added.length }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('keymaps:openDir', () => {
+    const dir = store.getKeymapsDir()
+    void shell.openPath(dir)
+    return { ok: true, dir }
+  })
 
   // ---- fullscreen ----
   ipcMain.handle('fullscreen:enter', async () => {

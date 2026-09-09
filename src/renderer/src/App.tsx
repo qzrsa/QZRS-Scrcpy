@@ -302,7 +302,13 @@ export default function App(): JSX.Element {
       )}
 
       {panel === 'settings' && <SettingsPanel onClose={() => setPanel(null)} />}
-      {panel === 'keymap' && <KeymapPanel onClose={() => setPanel(null)} onOpenVisualEditor={handleToggleKeymapEdit} />}
+      {panel === 'keymap' && (
+        <KeymapPanel
+          onClose={() => setPanel(null)}
+          onOpenVisualEditor={handleToggleKeymapEdit}
+          onToast={showToast}
+        />
+      )}
       {panel === 'tools' && <ToolsPanel serial={activeSession?.serial ?? null} onClose={() => setPanel(null)} />}
       {connectOpen && <ConnectDialog onClose={() => setConnectOpen(false)} />}
       {clipboardOpen && activeSession && <ClipboardDialog send={send} onClose={() => setClipboardOpen(false)} />}

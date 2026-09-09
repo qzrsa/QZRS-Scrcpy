@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeymapBinding, KeymapConfig, KeymapOverlay } from '@shared/types'
 import { useApp } from '../store'
 import { Drawer } from './Drawer'
-import { IconPlus, IconClose } from './icons'
+import { IconPlus, IconClose, IconUpload, IconDownload, IconFolder } from './icons'
 
 interface Props {
   onClose: () => void
   onOpenVisualEditor?: () => void
+  onToast?: (msg: string, type: 'info' | 'error' | 'success') => void
 }
 
 const emptyBinding = (key: string): KeymapBinding => ({
@@ -67,7 +68,7 @@ const PRESETS: { label: string; key: string; action: KeymapBinding['action']; x:
   { label: 'Shift 扳机', key: 'ShiftLeft', action: 'tap', x: 0.6, y: 0.88 }
 ]
 
-export function KeymapPanel({ onClose, onOpenVisualEditor }: Props): JSX.Element {
+export function KeymapPanel({ onClose, onOpenVisualEditor, onToast }: Props): JSX.Element {
   const { keymaps, updateKeymaps, settings, setActiveKeymapId } = useApp()
   const [configs, setConfigs] = useState<KeymapConfig[]>(keymaps)
   const [activeId, setActiveId] = useState<string | null>(settings.activeKeymapId)
@@ -98,6 +99,33 @@ export function KeymapPanel({ onClose, onOpenVisualEditor }: Props): JSX.Element
     void updateKeymaps(configs)
     void setActiveKeymapId(activeId)
     onClose()
+  }
+
+  // 导出：先落盘再导出，保证导出的就是面板里看到的这份（含未保存改动）
+  const handleExport = async (cid: string): Promise<void> => {
+    await updateKeymaps(configs)
+    const r = await window.api.exportKeymap(cid)
+    if (r.ok) onToast?.(`已导出：${r.path ?? ''}`, 'success')
+    else if (r.message !== '已取消') onToast?.(r.message ?? '导出失败', 'error')
+  }
+
+  // 导入：先保存当前编辑避免丢失，再从文件合并（id/名称冲突由主进程自动改名）
+  const handleImport = async (): Promise<void> => {
+    await updateKeymaps(configs)
+    const r = await window.api.importKeymap()
+    if (!r.ok) {
+      if (r.message !== '已取消') onToast?.(r.message ?? '导入失败', 'error')
+      return
+    }
+    const next = r.keymaps ?? []
+    setConfigs(next)
+    await updateKeymaps(next)
+    onToast?.(`已导入 ${r.added ?? 0} 个方案`, 'success')
+  }
+
+  const handleOpenKeymapsDir = async (): Promise<void> => {
+    const r = await window.api.openKeymapsDir()
+    if (!r.ok) onToast?.('打开方案文件夹失败', 'error')
   }
 
   const addConfig = (): void => {
@@ -199,6 +227,13 @@ export function KeymapPanel({ onClose, onOpenVisualEditor }: Props): JSX.Element
                   title="录制下一个键盘按键为新绑定"
                 >
                   {capturingFor?.startsWith(`${cfg.id}:`) ? '按下按键…' : '+ 添加按键'}
+                </button>
+                <button
+                  className="icon-btn"
+                  title="导出此方案为 json 文件"
+                  onClick={() => void handleExport(cfg.id)}
+                >
+                  <IconUpload width={16} height={16} />
                 </button>
                 <button className="icon-btn" title="删除方案" onClick={() => removeConfig(cfg.id)}>
                   <IconClose width={16} height={16} />
@@ -440,9 +475,23 @@ export function KeymapPanel({ onClose, onOpenVisualEditor }: Props): JSX.Element
         ))}
       </div>
 
-      <div className="row" style={{ marginTop: 16, gap: 8 }}>
+      <div className="row" style={{ marginTop: 16, gap: 8, flexWrap: 'wrap' }}>
         <button className="btn btn-ghost" onClick={addConfig}>
           <IconPlus width={16} height={16} /> 新建方案
+        </button>
+        <button
+          className="btn btn-ghost"
+          onClick={() => void handleImport()}
+          title="从 json 文件导入按键方案"
+        >
+          <IconDownload width={16} height={16} /> 导入方案
+        </button>
+        <button
+          className="btn btn-ghost"
+          onClick={() => void handleOpenKeymapsDir()}
+          title="打开方案文件夹，可直接备份或分享里面的 json"
+        >
+          <IconFolder width={16} height={16} /> 方案文件夹
         </button>
         {onOpenVisualEditor && (
           <button
