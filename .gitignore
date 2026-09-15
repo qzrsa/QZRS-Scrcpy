@@ -15,3 +15,6 @@ keymaps/
 
 # AI 生图原始带水印产物（ImageGen 输出，处理后用 icon.png）
 resources/App_icon_*.png
+
+# 图标修改前的备份（带时间戳，仅本地回滚用）
+resources/_icon_backup_*/
