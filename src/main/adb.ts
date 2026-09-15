@@ -1,5 +1,134 @@
 import { spawn } from 'node:child_process'
+import net from 'node:net'
+import os from 'node:os'
 import type { DeviceInfo, DeviceState, AdbShellResult } from '@shared/types'
+
+/** 本机所在网段列表（如 ["192.168.11"]），用于局域网扫描。 */
+export function localSubnets(): string[] {
+  const out = new Set<string>()
+  for (const list of Object.values(os.networkInterfaces())) {
+    for (const ni of list ?? []) {
+      // 只取 IPv4 非回环地址；按 /24 处理（家庭/办公网络绝大多数情况）
+      if (ni.family === 'IPv4' && !ni.internal) {
+        out.add(ni.address.split('.').slice(0, 3).join('.'))
+      }
+    }
+  }
+  return [...out]
+}
+
+/** 虚拟网卡 MAC OUI 前缀（含 VPN 伪接口的全零 MAC） */
+const VIRTUAL_MAC_PREFIXES = [
+  '00:00:00', // VPN / 隧道伪接口（如 vgate0）——正常物理网卡不会是全零
+  '00:50:56', // VMware
+  '00:0c:29', // VMware
+  '00:05:69', // VMware
+  '08:00:27', // VirtualBox
+  '00:15:5d', // Hyper-V
+  '00:1c:42', // Parallels
+  '02:00:4c' // Microsoft Loopback / WSL
+]
+
+/** 虚拟网卡接口名特征 */
+const VIRTUAL_NAME_RE =
+  /vmware|virtualbox|hyper-v|vethernet|tap-|tunnel|loopback|pseudo|tailscale|zerotier|radmin|npcap|wsl/i
+
+/**
+ * 物理网卡所在网段（排除 VPN / 虚拟机 / 隧道等虚拟网卡），如 ["192.168.11"]。
+ *
+ * 不能用「默认路由选出的主网段」代替：本机实测装了 VPN 时，系统默认路由指向
+ * VPN 网卡（172.30.234），而真实局域网是 192.168.11，会扫错地方、一台都发现不了。
+ * 按 MAC OUI + 接口名过滤虚拟网卡才是可靠做法。
+ */
+export function physicalSubnets(): string[] {
+  const out = new Set<string>()
+  for (const [name, list] of Object.entries(os.networkInterfaces())) {
+    const nameIsVirtual = VIRTUAL_NAME_RE.test(name)
+    for (const ni of list ?? []) {
+      if (ni.family !== 'IPv4' || ni.internal) continue
+      const mac = (ni.mac ?? '').toLowerCase()
+      const macIsVirtual =
+        mac === '' || VIRTUAL_MAC_PREFIXES.some((p) => mac.startsWith(p))
+      if (nameIsVirtual || macIsVirtual) continue
+      out.add(ni.address.split('.').slice(0, 3).join('.'))
+    }
+  }
+  return [...out]
+}
+
+/** 探测单个 IP:port 是否可连通。 */
+function probeTcp(ip: string, port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = new net.Socket()
+    let done = false
+    const finish = (v: boolean): void => {
+      if (done) return
+      done = true
+      sock.destroy()
+      resolve(v)
+    }
+    sock.setTimeout(timeoutMs)
+    sock.once('connect', () => finish(true))
+    sock.once('timeout', () => finish(false))
+    sock.once('error', () => finish(false))
+    sock.connect(port, ip)
+  })
+}
+
+export interface ScanOptions {
+  /** 单地址连接超时（毫秒） */
+  timeoutMs?: number
+  /** 并发探测数 */
+  concurrency?: number
+  /** 限定扫描的网段（如 ["192.168.11"]）；不传则按 allSubnets 决定 */
+  subnets?: string[]
+  /** true = 连虚拟网卡（VMware/VPN/隧道）网段一起扫，慢很多，用于兜底 */
+  allSubnets?: boolean
+}
+
+/**
+ * 扫描局域网内开放 adb 端口的设备，返回 IP 列表（按数值升序）。
+ *
+ * 注意：`adb mdns services` 只能发现 Android 11+ 手动开启「无线调试」开关后
+ * 广播 _adb-tls-connect._tcp 的设备；而 `adb tcpip 5555` 模式的设备不发 mDNS
+ * 广播，只能靠端口扫描发现。本项目实测场景属于后者，故用端口扫描。
+ *
+ * 默认只扫**物理网卡**网段（排除 VPN/虚拟机网卡，本机实测约 0.8 秒扫完 254 个地址）。
+ * 若一台都没扫到，可用 allSubnets=true 兜底扫全部网段（含虚拟网卡）。
+ */
+export async function scanLanAdb(port = 5555, opts: ScanOptions = {}): Promise<string[]> {
+  const { timeoutMs = 400, concurrency = 128, allSubnets = false } = opts
+  let subnets = opts.subnets
+  if (!subnets || subnets.length === 0) {
+    subnets = allSubnets ? localSubnets() : physicalSubnets()
+    // 物理网段判定失败时（极端环境）回退到全部网段，避免因过滤过严导致扫不到
+    if (!allSubnets && subnets.length === 0) subnets = localSubnets()
+  }
+  if (subnets.length === 0) return []
+
+  const ips: string[] = []
+  for (const s of subnets) {
+    for (let i = 1; i <= 254; i++) ips.push(`${s}.${i}`)
+  }
+
+  const found: string[] = []
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    while (cursor < ips.length) {
+      const ip = ips[cursor++]
+      // eslint-disable-next-line no-await-in-loop
+      if (await probeTcp(ip, port, timeoutMs)) found.push(ip)
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, ips.length) }, worker))
+
+  const num = (ip: string): number[] => ip.split('.').map(Number)
+  return found.sort((a, b) => {
+    const na = num(a)
+    const nb = num(b)
+    return na[0] - nb[0] || na[1] - nb[1] || na[2] - nb[2] || na[3] - nb[3]
+  })
+}
 
 /** Thin wrapper around the adb executable. */
 export class AdbClient {

@@ -1166,6 +1166,16 @@ textarea {
   50% { opacity: 0.6; }
 }
 
+/* 扫描局域网时旋转图标 */
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Recording state for the control itself */
 .keymap-editor-control.recording {
   border-color: #ff4444;

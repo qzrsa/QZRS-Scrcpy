@@ -19,6 +19,11 @@ const api = {
   connectDevice: (hostPort: string): Promise<OpResult> => ipcRenderer.invoke('device:connect', hostPort),
   disconnectDevice: (hostPort: string): Promise<OpResult> => ipcRenderer.invoke('device:disconnect', hostPort),
   setTcpip: (serial: string, port: number): Promise<OpResult> => ipcRenderer.invoke('device:tcpip', serial, port),
+  scanLanDevices: (
+    port?: number,
+    allSubnets?: boolean
+  ): Promise<{ ok: boolean; ips: string[]; subnets: string[]; message?: string }> =>
+    ipcRenderer.invoke('devices:scan', port, allSubnets),
 
   startSession: (serial: string, opts: SessionOptions): Promise<{ sessionId: string }> =>
     ipcRenderer.invoke('session:start', serial, opts),

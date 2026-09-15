@@ -3,7 +3,7 @@ import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { AdbClient } from './adb'
+import { AdbClient, localSubnets, physicalSubnets, scanLanAdb } from './adb'
 import { ScrcpySession } from './session'
 import { Store } from './stores'
 import { findAdb, findServer, findScrcpy } from './util'
@@ -180,6 +180,22 @@ export function registerIpc(store: Store): AppManager {
   // ---- IPC handlers ----
   ipcMain.handle('devices:list', () => refreshDevices())
   ipcMain.handle('devices:refresh', () => refreshDevices())
+
+  // 扫描局域网内开放 adb 端口的设备（adb tcpip 模式不发 mDNS 广播，只能扫端口）
+  // allSubnets=true 时连虚拟机/虚拟网卡网段一起扫（慢很多，按需开启）
+  ipcMain.handle('devices:scan', async (_e, port?: number, allSubnets?: boolean) => {
+    try {
+      const subnets = allSubnets ? localSubnets() : physicalSubnets()
+      let found = await scanLanAdb(port ?? 5555, { allSubnets: !!allSubnets })
+      // 一台都没扫到时自动重试一次：设备偶发无响应会导致误报"未发现"
+      if (found.length === 0) {
+        found = await scanLanAdb(port ?? 5555, { allSubnets: !!allSubnets, timeoutMs: 700, concurrency: 96 })
+      }
+      return { ok: true, ips: found, subnets }
+    } catch (err) {
+      return { ok: false, ips: [], subnets: [], message: err instanceof Error ? err.message : String(err) }
+    }
+  })
 
   ipcMain.handle('device:connect', async (_e, hostPort: string) => {
     try {
