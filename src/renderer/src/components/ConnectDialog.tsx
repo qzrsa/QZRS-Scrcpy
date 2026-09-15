@@ -16,12 +16,17 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
   const [msg, setMsg] = useState<string | null>(null)
   const [switching, setSwitching] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
+  const [deep, setDeep] = useState(false)
   const [scanned, setScanned] = useState<ScanResult | null>(null)
 
   const usbDevices = devices.filter((d) => d.transport !== 'tcpip' && d.state === 'device')
 
-  /** 扫描局域网内开放 5555 端口的设备。adb tcpip 模式不发 mDNS 广播，只能扫端口。 */
+  /**
+   * 扫描局域网内开放 5555 端口的设备。adb tcpip 模式不发 mDNS 广播，只能扫端口。
+   * all=false 只扫物理网卡网段（快）；all=true 连虚拟网卡（VMware/VPN）网段一起扫。
+   */
   const scan = useCallback(async (all = false): Promise<void> => {
+    setDeep(all)
     setScanning(true)
     const r = await window.api.scanLanDevices(5555, all)
     setScanned(r)
@@ -91,33 +96,42 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
           <div className="field">
             <div className="row between">
               <label style={{ marginBottom: 0 }}>局域网设备（扫描 5555 端口）</label>
-              <button className="btn btn-ghost btn-sm" disabled={scanning} onClick={() => void scan()}>
-                <IconRefresh width={14} height={14} className={scanning ? 'spin' : undefined} />
-                {scanning ? '扫描中…' : '重新扫描'}
-              </button>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn btn-ghost btn-sm" disabled={scanning} onClick={() => void scan(false)}>
+                  <IconRefresh width={14} height={14} className={scanning && !deep ? 'spin' : undefined} />
+                  {scanning && !deep ? '扫描中…' : '重新扫描'}
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  disabled={scanning}
+                  title="连同 VMware / VPN 等虚拟网卡网段一起扫描，覆盖更全但耗时更长"
+                  onClick={() => void scan(true)}
+                >
+                  <IconRefresh width={14} height={14} className={scanning && deep ? 'spin' : undefined} />
+                  {scanning && deep ? '深度扫描中…' : '深度扫描'}
+                </button>
+              </div>
             </div>
 
             {scanning && (
               <div className="hint" style={{ marginTop: 6 }}>
-                正在扫描 {scanned?.subnets?.length ? `${scanned.subnets.join('、')}.0/24` : '局域网'}…
+                正在{deep ? '深度' : ''}扫描 {scanned?.subnets?.length ? `${scanned.subnets.join('、')}.0/24` : '局域网'}…
               </div>
             )}
 
             {!scanning && scanned?.ok && scanned.ips.length === 0 && (
               <div className="hint" style={{ marginTop: 6 }}>
-                未发现设备。请确认手机已开启无线调试（adb tcpip 5555）且与电脑在同一网段。
-                <button
-                  className="btn btn-ghost btn-sm"
-                  style={{ marginLeft: 8 }}
-                  onClick={() => void scan(true)}
-                >
-                  深度扫描（含虚拟网卡网段，较慢）
-                </button>
+                未发现设备。请确认手机已开启无线调试（adb tcpip 5555）且与电脑在同一网段；
+                若手机在其它网段，可试用「深度扫描」。
               </div>
             )}
 
             {!scanning && scanned?.ok && scanned.ips.length > 0 && (
               <div style={{ marginTop: 6 }}>
+                <div className="hint" style={{ marginBottom: 4 }}>
+                  已扫描 {scanned.subnets.length ? scanned.subnets.map((s) => `${s}.0/24`).join('、') : '局域网'}
+                  ，发现 {scanned.ips.length} 台
+                </div>
                 {scanned.ips.map((ip) => {
                   const connected = devices.some((d) => d.serial.startsWith(ip))
                   return (
