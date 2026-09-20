@@ -23,7 +23,7 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
 
   /**
    * 扫描局域网内开放 5555 端口的设备。adb tcpip 模式不发 mDNS 广播，只能扫端口。
-   * all=false 只扫物理网卡网段（快）；all=true 连虚拟网卡（VMware/VPN）网段一起扫。
+   * all=false 只扫物理网卡网段（快）；all=true 额外扫虚拟网卡（VMware/VPN）网段与本机回环 127.0.0.0/24。
    */
   const scan = useCallback(async (all = false): Promise<void> => {
     setDeep(all)
@@ -104,7 +104,7 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
                 <button
                   className="btn btn-ghost btn-sm"
                   disabled={scanning}
-                  title="连同 VMware / VPN 等虚拟网卡网段一起扫描，覆盖更全但耗时更长"
+                  title="连同 VMware / VPN 等虚拟网卡网段，以及本机回环 127.0.0.1（端口转发/内网穿透）一起扫描，覆盖更全但耗时更长"
                   onClick={() => void scan(true)}
                 >
                   <IconRefresh width={14} height={14} className={scanning && deep ? 'spin' : undefined} />
@@ -115,14 +115,15 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
 
             {scanning && (
               <div className="hint" style={{ marginTop: 6 }}>
-                正在{deep ? '深度' : ''}扫描 {scanned?.subnets?.length ? `${scanned.subnets.join('、')}.0/24` : '局域网'}…
+                正在{deep ? '深度' : ''}扫描{' '}
+                {scanned?.subnets?.length ? scanned.subnets.map((s) => `${s}.0/24`).join('、') : '局域网'}…
               </div>
             )}
 
             {!scanning && scanned?.ok && scanned.ips.length === 0 && (
               <div className="hint" style={{ marginTop: 6 }}>
                 未发现设备。请确认手机已开启无线调试（adb tcpip 5555）且与电脑在同一网段；
-                若手机在其它网段，可试用「深度扫描」。
+                若手机在其它网段，可试用「深度扫描」（会额外扫虚拟网卡网段与本机 127.0.0.1）。
               </div>
             )}
 

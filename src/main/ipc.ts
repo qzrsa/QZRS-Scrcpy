@@ -3,7 +3,7 @@ import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { AdbClient, localSubnets, physicalSubnets, scanLanAdb } from './adb'
+import { AdbClient, deepScanSubnets, physicalSubnets, scanLanAdb } from './adb'
 import { ScrcpySession } from './session'
 import { Store } from './stores'
 import { findAdb, findServer, findScrcpy } from './util'
@@ -185,7 +185,7 @@ export function registerIpc(store: Store): AppManager {
   // allSubnets=true 时连虚拟机/虚拟网卡网段一起扫（慢很多，按需开启）
   ipcMain.handle('devices:scan', async (_e, port?: number, allSubnets?: boolean) => {
     try {
-      const subnets = allSubnets ? localSubnets() : physicalSubnets()
+      const subnets = allSubnets ? deepScanSubnets() : physicalSubnets()
       let found = await scanLanAdb(port ?? 5555, { allSubnets: !!allSubnets })
       // 一台都没扫到时自动重试一次：设备偶发无响应会导致误报"未发现"
       if (found.length === 0) {
