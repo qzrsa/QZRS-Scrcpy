@@ -58,21 +58,33 @@ export function physicalSubnets(): string[] {
 
 /**
  * 回环网段。本机网卡枚举拿不到它（127.0.0.1 的 ni.internal === true 会被过滤掉），
- * 但通过内网穿透（nps/frp）或端口转发把远端 adb 映射到本机 127.0.0.1:5555 时，
- * 只有扫回环才能发现该设备。因此「深度扫描」把它作为兜底一并扫。
+ * 必须显式加。用途：发现经内网穿透（nps/frp）、端口转发或本机模拟器暴露在
+ * 127.0.0.1:5555 的 adb 设备。
+ *
+ * 成本极低：内核立即回 RST（ECONNREFUSED），整段 254 个地址约 50ms，且与 timeoutMs 无关。
  */
 const LOOPBACK_SUBNET = '127.0'
 
+/** 往网段列表补上回环网段（已含则不重复）。 */
+function withLoopback(subnets: string[]): string[] {
+  return subnets.includes(LOOPBACK_SUBNET) ? subnets : [...subnets, LOOPBACK_SUBNET]
+}
+
+/**
+ * 「快速扫描」的网段集合 = 物理网卡网段 + 回环网段。
+ *
+ * 物理网段判定失败时（极端环境，全是虚拟网卡）回退到全部网卡网段，避免因过滤过严导致扫不到。
+ */
+export function fastScanSubnets(): string[] {
+  const phys = physicalSubnets()
+  return withLoopback(phys.length > 0 ? phys : localSubnets())
+}
+
 /**
  * 「深度扫描」的网段集合 = 本机全部网卡网段（含 VMware / VPN 等虚拟网卡）+ 回环网段。
- *
- * 注意：快扫（physicalSubnets）与快扫的兜底重试**都不含**回环，只有真正点「深度扫描」
- * 才会扫 127.0.0.0/24，避免常规扫描里混入本机误报。
  */
 export function deepScanSubnets(): string[] {
-  const out = localSubnets()
-  if (!out.includes(LOOPBACK_SUBNET)) out.push(LOOPBACK_SUBNET)
-  return out
+  return withLoopback(localSubnets())
 }
 
 /** 探测单个 IP:port 是否可连通。 */
@@ -101,7 +113,7 @@ export interface ScanOptions {
   concurrency?: number
   /** 限定扫描的网段（如 ["192.168.11"]）；不传则按 allSubnets 决定 */
   subnets?: string[]
-  /** true = 连虚拟网卡（VMware/VPN/隧道）网段 + 回环 127.0.0.0/24 一起扫，慢很多，用于兜底 */
+  /** true = 额外连虚拟网卡（VMware/VPN/隧道）网段一起扫，慢很多，用于兜底 */
   allSubnets?: boolean
 }
 
@@ -112,16 +124,14 @@ export interface ScanOptions {
  * 广播 _adb-tls-connect._tcp 的设备；而 `adb tcpip 5555` 模式的设备不发 mDNS
  * 广播，只能靠端口扫描发现。本项目实测场景属于后者，故用端口扫描。
  *
- * 默认只扫**物理网卡**网段（排除 VPN/虚拟机网卡，本机实测约 0.8 秒扫完 254 个地址）。
- * 若一台都没扫到，可用 allSubnets=true 兜底扫**全部网段 + 回环 127.0.0.0/24**。
+ * 默认（快扫）只扫**物理网卡**网段 + 回环网段（排除 VPN/虚拟机网卡，本机实测约 0.85 秒）。
+ * 若一台都没扫到，可用 allSubnets=true 兜底扫**全部网卡网段 + 回环网段**。
  */
 export async function scanLanAdb(port = 5555, opts: ScanOptions = {}): Promise<string[]> {
   const { timeoutMs = 400, concurrency = 128, allSubnets = false } = opts
   let subnets = opts.subnets
   if (!subnets || subnets.length === 0) {
-    subnets = allSubnets ? deepScanSubnets() : physicalSubnets()
-    // 物理网段判定失败时（极端环境）回退到全部网段，避免因过滤过严导致扫不到
-    if (!allSubnets && subnets.length === 0) subnets = localSubnets()
+    subnets = allSubnets ? deepScanSubnets() : fastScanSubnets()
   }
   if (subnets.length === 0) return []
 

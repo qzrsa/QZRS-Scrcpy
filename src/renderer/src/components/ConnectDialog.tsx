@@ -23,7 +23,7 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
 
   /**
    * 扫描局域网内开放 5555 端口的设备。adb tcpip 模式不发 mDNS 广播，只能扫端口。
-   * all=false 只扫物理网卡网段（快）；all=true 额外扫虚拟网卡（VMware/VPN）网段与本机回环 127.0.0.0/24。
+   * all=false 扫物理网卡网段 + 本机回环 127.0.0.0/24（快）；all=true 额外再扫虚拟网卡（VMware/VPN）网段。
    */
   const scan = useCallback(async (all = false): Promise<void> => {
     setDeep(all)
@@ -104,7 +104,7 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
                 <button
                   className="btn btn-ghost btn-sm"
                   disabled={scanning}
-                  title="连同 VMware / VPN 等虚拟网卡网段，以及本机回环 127.0.0.1（端口转发/内网穿透）一起扫描，覆盖更全但耗时更长"
+                  title="额外扫描 VMware / VPN 等虚拟网卡网段（回环 127.0.0.1 两种模式都会扫），覆盖更全但耗时更长"
                   onClick={() => void scan(true)}
                 >
                   <IconRefresh width={14} height={14} className={scanning && deep ? 'spin' : undefined} />
@@ -122,7 +122,7 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
             {!scanning && scanned?.ok && scanned.ips.length === 0 && (
               <div className="hint" style={{ marginTop: 6 }}>
                 未发现设备。请确认手机已开启无线调试（adb tcpip 5555）且与电脑在同一网段；
-                若手机在其它网段，可试用「深度扫描」（会额外扫虚拟网卡网段与本机 127.0.0.1）。
+                若手机在其它网段，可试用「深度扫描」（额外扫虚拟网卡网段）。
               </div>
             )}
 
@@ -142,6 +142,15 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
                     >
                       <span className="device-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <IconWifi width={14} height={14} /> {ip}:5555
+                        {ip.startsWith('127.') && (
+                          <span
+                            className="hint"
+                            title="本机回环地址：来自端口转发 / 内网穿透 / 本机模拟器，不是局域网设备"
+                            style={{ border: '1px solid var(--border)', borderRadius: 4, padding: '0 4px' }}
+                          >
+                            本机
+                          </span>
+                        )}
                       </span>
                       {connected ? (
                         <span className="hint" style={{ color: 'var(--green)' }}>已连接</span>
