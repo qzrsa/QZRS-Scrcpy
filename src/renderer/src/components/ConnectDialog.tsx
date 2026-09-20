@@ -115,8 +115,7 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
 
             {scanning && (
               <div className="hint" style={{ marginTop: 6 }}>
-                正在{deep ? '深度' : ''}扫描{' '}
-                {scanned?.subnets?.length ? scanned.subnets.map((s) => `${s}.0/24`).join('、') : '局域网'}…
+                正在{deep ? '深度' : ''}扫描（{deep ? '全部网卡网段 + 127.0.0.1' : '仅物理网卡网段'}），请稍候…
               </div>
             )}
 

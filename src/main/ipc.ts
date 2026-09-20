@@ -182,7 +182,7 @@ export function registerIpc(store: Store): AppManager {
   ipcMain.handle('devices:refresh', () => refreshDevices())
 
   // 扫描局域网内开放 adb 端口的设备（adb tcpip 模式不发 mDNS 广播，只能扫端口）
-  // allSubnets=true 时连虚拟机/虚拟网卡网段一起扫（慢很多，按需开启）
+  // allSubnets=true 时连虚拟机/虚拟网卡网段 + 回环 127.0.0.0/24 一起扫（慢很多，按需开启）
   ipcMain.handle('devices:scan', async (_e, port?: number, allSubnets?: boolean) => {
     try {
       const subnets = allSubnets ? deepScanSubnets() : physicalSubnets()
