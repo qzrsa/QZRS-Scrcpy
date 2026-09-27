@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { DeviceInfo } from '@shared/types'
 import { useApp } from '../store'
-import { IconRefresh, IconWifi, IconUsb, IconPhone, IconPlay, IconSettings } from './icons'
+import { IconRefresh, IconWifi, IconUsb, IconPhone, IconPlay, IconSettings, IconMonitorPlay } from './icons'
 
 interface Props {
   activeSessionSerial: string | null
@@ -109,7 +109,7 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
                 }}
                 title="在 Scrcpy 独立窗口中查看（WebCodecs 渲染异常时的回退方案）"
               >
-                <IconSettings width={13} height={13} />
+                <IconMonitorPlay width={13} height={13} />
               </button>
             </div>
           )

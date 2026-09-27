@@ -181,6 +181,15 @@ export const IconMonitor = (p: P): JSX.Element => (
     <path d="M12 17v4" />
   </svg>
 )
+/** 在 Scrcpy 原生独立窗口中查看（显示器 + 播放三角，语义区别于"设置"齿轮）。 */
+export const IconMonitorPlay = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <rect x="2" y="3" width="20" height="14" rx="2" />
+    <path d="M8 21h8" />
+    <path d="M12 17v4" />
+    <path d="M10.5 7.6v4.8l4.2-2.4z" fill="currentColor" stroke="none" />
+  </svg>
+)
 export const IconLayers = (p: P): JSX.Element => (
   <svg {...base(p)}>
     <path d="m12 2 9 5-9 5-9-5 9-5z" />
