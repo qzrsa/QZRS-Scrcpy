@@ -18,6 +18,8 @@ const api = {
   refreshDevices: (): Promise<DeviceInfo[]> => ipcRenderer.invoke('devices:refresh'),
   connectDevice: (hostPort: string): Promise<OpResult> => ipcRenderer.invoke('device:connect', hostPort),
   disconnectDevice: (hostPort: string): Promise<OpResult> => ipcRenderer.invoke('device:disconnect', hostPort),
+  /** 从历史设备列表里删除（tcpip 设备会先 adb disconnect，避免轮询立刻写回） */
+  forgetDevice: (serial: string): Promise<OpResult> => ipcRenderer.invoke('devices:forget', serial),
   setTcpip: (serial: string, port: number): Promise<OpResult> => ipcRenderer.invoke('device:tcpip', serial, port),
   scanLanDevices: (
     port?: number,

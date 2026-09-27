@@ -1432,3 +1432,86 @@ textarea {
 .titlebar-btn.close:active {
   background: #c4000e;
 }
+
+/* ===== 历史设备（仅存在于记录中，当前未连接） ===== */
+.device-card.known {
+  opacity: 0.62;
+}
+
+.device-card.known:hover {
+  opacity: 0.9;
+}
+
+.device-tag {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--text-faint);
+  flex-shrink: 0;
+}
+
+/* ===== 右键菜单 ===== */
+.ctx-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+}
+
+.ctx-menu {
+  position: fixed;
+  z-index: 901;
+  min-width: 176px;
+  max-width: 260px;
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+}
+
+.ctx-title {
+  padding: 5px 9px 7px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctx-item {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  text-align: left;
+  font-size: 12.5px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.12s, color 0.12s;
+}
+
+.ctx-item:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.ctx-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ctx-item.danger {
+  color: var(--red);
+}
+
+.ctx-item.danger:hover:not(:disabled) {
+  background: rgba(248, 113, 113, 0.14);
+}

@@ -9,6 +9,24 @@ export interface DeviceInfo {
   device: string | null
   product: string | null
   transport: string | null // 'usb' | 'local' | 'tcpip'
+  /**
+   * true = 该条目仅来自历史记录（当前未连接，`adb devices` 里没有）。
+   * 主进程 refreshDevices() 会把历史设备以 state='offline' 合并进列表，
+   * 渲染层据此置灰显示并给出「历史」标记。
+   */
+  known?: boolean
+}
+
+/**
+ * 历史连接过的设备，持久化在 `userData/data/devices.json`。
+ * 目的是重启后列表不为空：tcpip 设备的 serial 本身带 IP:端口，可直接 adb connect 回连。
+ */
+export interface DeviceHistoryEntry {
+  serial: string
+  model: string | null
+  transport: string | null
+  /** 最近一次看到该设备在线的时间（epoch ms），用于「最近在前」排序 */
+  lastSeen: number
 }
 
 export type VideoCodec = 'h264' | 'h265' | 'av1'

@@ -1,7 +1,12 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { app } from 'electron'
-import type { AppSettings, KeymapConfig } from '@shared/types'
+import type { AppSettings, DeviceHistoryEntry, DeviceInfo, KeymapConfig } from '@shared/types'
+
+/** 历史设备最多保留条数，防止 devices.json 无限增长 */
+const MAX_DEVICE_HISTORY = 50
+/** 仅 lastSeen 前进时的落盘节流：两次写盘至少间隔 60s（轮询每 3s 一次，不节流会一直写盘） */
+const HISTORY_TOUCH_THROTTLE_MS = 60_000
 
 const DEFAULT_SETTINGS: AppSettings = {
   adbPath: '',
@@ -87,12 +92,14 @@ function keymapsDir(): string {
 
 export class Store {
   private settingsPath: string
+  private devicesPath: string
   private keymapsDirPath: string
   private legacyKeymapsPath: string
 
   constructor() {
     const dir = dataDir()
     this.settingsPath = join(dir, 'settings.json')
+    this.devicesPath = join(dir, 'devices.json')
     this.legacyKeymapsPath = join(dir, 'keymaps.json')
     this.keymapsDirPath = keymapsDir()
     // ensure settings exists with defaults
@@ -130,6 +137,62 @@ export class Store {
 
   setSettings(s: AppSettings): void {
     writeJson(this.settingsPath, s)
+  }
+
+  /** 历史连接过的设备（最近在前） */
+  getDeviceHistory(): DeviceHistoryEntry[] {
+    const raw = readJson<unknown>(this.devicesPath, [])
+    if (!Array.isArray(raw)) return []
+    return (raw as DeviceHistoryEntry[]).filter(
+      (d) => d && typeof d.serial === 'string' && d.serial.length > 0
+    )
+  }
+
+  /**
+   * 把当前在线的设备并入历史记录，返回合并后的完整历史（最近在前）。
+   *
+   * 每 3s 轮询都会调用，因此写盘做了节流：
+   * - 有结构性变化（新增设备 / model / transport 改变）→ 立即写；
+   * - 只有 lastSeen 前进 → 至少间隔 60s 才写一次。
+   */
+  rememberDevices(live: DeviceInfo[]): DeviceHistoryEntry[] {
+    const prev = this.getDeviceHistory()
+    const map = new Map(prev.map((d) => [d.serial, d]))
+    const now = Date.now()
+    // Date.now() 只有毫秒分辨率：同一次调用里新增多台设备会拿到完全相同的 lastSeen，
+    // 排序结果退化成 adb 的遍历顺序，把「最近在前」和 50 条上限的语义弄错。
+    // 用一个单调递增的戳保证同批次内后处理到的更新，顺序确定且与后续调用可比。
+    let stamp = now
+    const nextStamp = (): number => (stamp += 1)
+    let structural = false
+    let touched = false
+
+    for (const d of live) {
+      // 只记「真正连上过」的设备：unauthorized / offline 不算
+      if (!d?.serial || d.state !== 'device') continue
+      const old = map.get(d.serial)
+      if (!old) {
+        map.set(d.serial, { serial: d.serial, model: d.model ?? null, transport: d.transport ?? null, lastSeen: nextStamp() })
+        structural = true
+        continue
+      }
+      const model = d.model ?? old.model
+      const transport = d.transport ?? old.transport
+      if (model !== old.model || transport !== old.transport) structural = true
+      if (now - old.lastSeen >= HISTORY_TOUCH_THROTTLE_MS) touched = true
+      map.set(d.serial, { serial: d.serial, model, transport, lastSeen: Math.max(old.lastSeen, now) })
+    }
+
+    const list = [...map.values()].sort((a, b) => b.lastSeen - a.lastSeen).slice(0, MAX_DEVICE_HISTORY)
+    if (structural || touched) writeJson(this.devicesPath, list)
+    return list
+  }
+
+  /** 从历史记录中删除一台设备（不碰 adb 连接，由调用方按需 disconnect） */
+  forgetDevice(serial: string): DeviceHistoryEntry[] {
+    const list = this.getDeviceHistory().filter((d) => d.serial !== serial)
+    writeJson(this.devicesPath, list)
+    return list
   }
 
   /** 读取方案目录下所有 json，每个文件是一个独立方案 */

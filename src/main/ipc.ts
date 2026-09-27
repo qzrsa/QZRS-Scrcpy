@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { AdbClient, deepScanSubnets, fastScanSubnets, scanLanAdb } from './adb'
+import { mergeDeviceHistory } from './devices'
 import { ScrcpySession } from './session'
 import { Store } from './stores'
 import { findAdb, findServer, findScrcpy } from './util'
@@ -69,19 +70,28 @@ export function registerIpc(store: Store): AppManager {
   }
 
   // ---- device polling ----
+  /**
+   * 合并 adb 在线设备与历史记录（见 devices.ts）。
+   * 这样重启后（tcpip 设备不会再自动出现）列表里仍留有设备，可右键重连或删除。
+   */
+  function refreshWithHistory(live: DeviceInfo[]): DeviceInfo[] {
+    return mergeDeviceHistory(live, store.rememberDevices(live))
+  }
+
   async function refreshDevices(): Promise<DeviceInfo[]> {
+    let live: DeviceInfo[] = []
     try {
-      const a = ensureAdb()
-      const list = await a.devices()
-      const json = JSON.stringify(list)
-      if (json !== lastDevicesJson) {
-        lastDevicesJson = json
-        send('devices:changed', list)
-      }
-      return list
+      live = await ensureAdb().devices()
     } catch {
-      return []
+      /* adb 不可用时至少把历史设备列出来 */
     }
+    const list = refreshWithHistory(live)
+    const json = JSON.stringify(list)
+    if (json !== lastDevicesJson) {
+      lastDevicesJson = json
+      send('devices:changed', list)
+    }
+    return list
   }
 
   function startPolling(): void {
@@ -212,6 +222,26 @@ export function registerIpc(store: Store): AppManager {
     try {
       const a = ensureAdb()
       await a.disconnect(hostPort)
+      await refreshDevices()
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // 从历史列表里删除设备。tcpip 设备（serial 形如 host:port）需先 adb disconnect，
+  // 否则下一次 3s 轮询会立刻把它当成在线设备重新写回历史，表现为「删不掉」。
+  // USB 设备拔不掉，若仍插着会在下次轮询时重新出现（菜单里已提示）。
+  ipcMain.handle('devices:forget', async (_e, serial: string) => {
+    try {
+      if (/^.+:\d+$/.test(serial)) {
+        try {
+          await ensureAdb().disconnect(serial)
+        } catch {
+          /* adb 不可用时也允许从历史里删掉 */
+        }
+      }
+      store.forgetDevice(serial)
       await refreshDevices()
       return { ok: true }
     } catch (err) {
