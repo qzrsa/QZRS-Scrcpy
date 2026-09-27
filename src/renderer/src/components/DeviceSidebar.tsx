@@ -109,7 +109,7 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
                 }}
                 title="在 Scrcpy 独立窗口中查看（WebCodecs 渲染异常时的回退方案）"
               >
-                <IconMonitorPlay width={13} height={13} />
+                <IconMonitorPlay width={15} height={15} />
               </button>
             </div>
           )
