@@ -25,6 +25,15 @@
   --toolbar-h: 60px;
   --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', sans-serif;
   --mono: 'JetBrains Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+
+  /* 自定义标题栏（frameless window 顶部 38px）。必须走变量，否则浅色模式下会留一条深色。
+     light 主题覆盖见下方 [data-theme='light']。 */
+  --titlebar-bg: rgba(15, 17, 21, 0.95);
+  --titlebar-border: rgba(255, 255, 255, 0.08);
+  --titlebar-hover: rgba(255, 255, 255, 0.1);
+  --titlebar-active: rgba(0, 0, 0, 0.2);
+  --titlebar-close-hover: #e81123;
+  --titlebar-close-active: #c4000e;
 }
 
 [data-theme='light'] {
@@ -41,6 +50,15 @@
   --accent-hover: #1d4ed8;
   --accent-soft: rgba(37, 99, 235, 0.1);
   --shadow: 0 12px 40px rgba(30, 40, 70, 0.16);
+
+  /* 标题栏浅色版：白底 + 深色发丝分隔线，hover 用黑色系低透明度（白色系在浅底上完全看不见） */
+  --titlebar-bg: rgba(255, 255, 255, 0.92);
+  --titlebar-border: rgba(20, 30, 55, 0.1);
+  --titlebar-hover: rgba(20, 30, 55, 0.07);
+  --titlebar-active: rgba(20, 30, 55, 0.13);
+  /* 浅色下不要整块铺 #e81123（红底红点、且白条上突然一块纯红很突兀），改成红色淡染 */
+  --titlebar-close-hover: rgba(232, 17, 35, 0.15);
+  --titlebar-close-active: rgba(232, 17, 35, 0.3);
 }
 
 * {
@@ -1331,13 +1349,13 @@ textarea {
   left: 0;
   right: 0;
   height: 38px;
-  background: rgba(15, 17, 21, 0.95);
+  background: var(--titlebar-bg);
   backdrop-filter: blur(12px);
   display: flex;
   align-items: center;
   justify-content: space-between;
   z-index: 200;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--titlebar-border);
   -webkit-app-region: drag;
 }
 
@@ -1366,27 +1384,21 @@ textarea {
   align-items: center;
   justify-content: center;
   transition: background 0.15s;
-  color: rgba(255, 255, 255, 0.8);
+  /* 无文字、无子节点：圆点全部由 ::before 画，所以这里不设 color。
+     以后若要加 macOS 那种 hover 符号（×／−／＋），颜色要相对圆点选（深色半透明），
+     不能跟随主题文字色，否则浅色模式下白底白字。 */
   background: transparent;
   padding: 0;
   line-height: 1;
 }
 
+/* Hover: 只提亮底色，不画符号（macOS 红绿灯样式） */
 .titlebar-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--titlebar-hover);
 }
 
 .titlebar-btn.close:hover {
-  background: #e81123;
-  color: #fff;
-}
-
-.titlebar-btn.minimize:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.titlebar-btn.maximize:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--titlebar-close-hover);
 }
 
 /* macOS-style traffic light dots */
@@ -1416,21 +1428,12 @@ textarea {
   box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.1);
 }
 
-/* Hover: slight background darkening, no symbols */
-.titlebar-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.titlebar-btn.close:hover {
-  background: #e81123;
-}
-
 .titlebar-btn:active {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--titlebar-active);
 }
 
 .titlebar-btn.close:active {
-  background: #c4000e;
+  background: var(--titlebar-close-active);
 }
 
 /* ===== 历史设备（仅存在于记录中，当前未连接） ===== */
@@ -1465,7 +1468,7 @@ textarea {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow);
 }
 
 .ctx-title {
