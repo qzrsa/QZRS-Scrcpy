@@ -1453,12 +1453,7 @@ textarea {
 }
 
 /* ===== 右键菜单 ===== */
-.ctx-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 900;
-}
-
+/* 关闭逻辑走 document 捕获阶段监听，不用全屏遮罩（遮罩会吞掉"右键另一台设备"的事件） */
 .ctx-menu {
   position: fixed;
   z-index: 901;

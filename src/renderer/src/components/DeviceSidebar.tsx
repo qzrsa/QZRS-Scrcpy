@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import { useState, useCallback, type MouseEvent } from 'react'
 import type { DeviceInfo } from '@shared/types'
 import { useApp } from '../store'
 import { IconRefresh, IconWifi, IconUsb, IconPhone, IconPlay, IconSettings } from './icons'
@@ -16,6 +16,8 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
   const { devices, sessions, refreshDevices, stopSession } = useApp()
   const [busy, setBusy] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  // 稳定引用：ContextMenu 的 document 监听依赖它，每次渲染换新函数会反复重订阅
+  const closeMenu = useCallback(() => setMenu(null), [])
 
   const runningFor = (serial: string): string | null => {
     const s = sessions.find((x) => x.serial === serial)
@@ -123,7 +125,7 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
 
       <div className="sidebar-section-title">设备列表 <span className="count">{devices.filter((d) => d.state === 'device').length}</span></div>
 
-      <div className="device-list" onScroll={() => setMenu(null)}>
+      <div className="device-list" onScroll={closeMenu}>
         {devices.length === 0 && (
           <div className="empty-devices">
             <IconPhone width={32} height={32} />
@@ -182,7 +184,7 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
         </button>
       </div>
 
-      <ContextMenu state={menu} onClose={() => setMenu(null)} />
+      <ContextMenu state={menu} onClose={closeMenu} />
     </aside>
   )
 }

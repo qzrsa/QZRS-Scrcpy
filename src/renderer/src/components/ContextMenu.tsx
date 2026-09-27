@@ -27,12 +27,17 @@ interface Props {
 }
 
 /**
- * 通用右键菜单：固定定位 + 全屏透明遮罩捕获外部点击，Esc 关闭。
+ * 通用右键菜单：固定定位，portal 到 body（否则会被 `.device-list` 的 overflow 裁切）。
  * 渲染后按实际尺寸把坐标夹回视口内（贴右/下边缘时自动左移/上移）。
+ *
+ * 关闭方式**不用全屏遮罩**，而是 document 的**捕获阶段**监听 mousedown / contextmenu：
+ * 全屏遮罩会吞掉「右键另一台设备」这次事件，用户得点两次；捕获阶段则保证
+ * 旧菜单先关、卡片自己的 onContextMenu（React 挂在容器上、走冒泡）随后打开新菜单。
  */
 export function ContextMenu({ state, onClose }: Props): JSX.Element | null {
   const ref = useRef<HTMLDivElement>(null)
   const [pos, setPos] = useState({ x: 0, y: 0 })
+  const open = state !== null
 
   useLayoutEffect(() => {
     if (!state) return
@@ -46,49 +51,48 @@ export function ContextMenu({ state, onClose }: Props): JSX.Element | null {
   }, [state])
 
   useEffect(() => {
-    if (!state) return
+    if (!open) return
+    const onOutside = (e: Event): void => {
+      if (ref.current && e.target instanceof Node && ref.current.contains(e.target)) return
+      onClose()
+    }
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') onClose()
     }
+    document.addEventListener('mousedown', onOutside, true)
+    document.addEventListener('contextmenu', onOutside, true)
     window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [state, onClose])
+    return () => {
+      document.removeEventListener('mousedown', onOutside, true)
+      document.removeEventListener('contextmenu', onOutside, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open, onClose])
 
   if (!state) return null
 
-  // 挂到 body 上：脱离 sidebar / device-list 的层叠与 overflow 上下文，避免被裁切或压在下层
   return createPortal(
-    <>
-      <div
-        className="ctx-backdrop"
-        onMouseDown={onClose}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          onClose()
-        }}
-      />
-      <div className="ctx-menu" ref={ref} style={{ left: pos.x, top: pos.y }} onContextMenu={(e) => e.preventDefault()}>
-        {state.title && (
-          <div className="ctx-title" title={state.title}>
-            {state.title}
-          </div>
-        )}
-        {state.items.map((it) => (
-          <button
-            key={it.key}
-            className={`ctx-item ${it.danger ? 'danger' : ''}`}
-            disabled={it.disabled}
-            title={it.hint || it.label}
-            onClick={() => {
-              onClose()
-              it.onClick()
-            }}
-          >
-            {it.label}
-          </button>
-        ))}
-      </div>
-    </>,
+    <div className="ctx-menu" ref={ref} style={{ left: pos.x, top: pos.y }} onContextMenu={(e) => e.preventDefault()}>
+      {state.title && (
+        <div className="ctx-title" title={state.title}>
+          {state.title}
+        </div>
+      )}
+      {state.items.map((it) => (
+        <button
+          key={it.key}
+          className={`ctx-item ${it.danger ? 'danger' : ''}`}
+          disabled={it.disabled}
+          title={it.hint || it.label}
+          onClick={() => {
+            onClose()
+            it.onClick()
+          }}
+        >
+          {it.label}
+        </button>
+      ))}
+    </div>,
     document.body
   )
 }
