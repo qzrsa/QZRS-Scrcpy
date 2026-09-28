@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import net from 'node:net'
 import os from 'node:os'
 import type { DeviceInfo, DeviceState, AdbShellResult } from '@shared/types'
@@ -191,6 +191,45 @@ export class AdbClient {
   async startServer(): Promise<boolean> {
     const r = await this.exec(['start-server'])
     return r.code === 0
+  }
+
+  /**
+   * 启动 `adb track-devices` 长连接监听：设备列表的任何变化（USB 插拔、tcpip
+   * connect/disconnect、device↔offline↔unauthorized 状态切换）都会立刻推送一条
+   * 消息，取代 3 秒轮询，设备发现延迟从最长 3s 降到毫秒级。
+   *
+   * 消息格式：4 字节十六进制长度前缀 + 该长度的设备列表文本（与 `adb devices`
+   * 输出相同）。连接建立后 adb 会先推一次当前列表。adb server 被杀时该进程退出
+   * （触发 'close'），由调用方决定重启策略。
+   *
+   * 返回子进程，调用方负责 kill；仅监听 'error'（spawn 失败）与解析回调。
+   */
+  trackDevices(onChange: (devicesText: string) => void, onError: (err: Error) => void): ChildProcess {
+    const child = spawn(this.path, ['track-devices'], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    let buf = Buffer.alloc(0)
+    const feed = (chunk: Buffer): void => {
+      buf = Buffer.concat([buf, chunk])
+      for (;;) {
+        if (buf.length < 4) return
+        const len = Number.parseInt(buf.subarray(0, 4).toString('ascii'), 16)
+        // 长度前缀非法（不应发生）：丢弃缓冲防止错误状态死循环
+        if (!Number.isFinite(len) || len < 0 || len > 1 << 20) {
+          buf = Buffer.alloc(0)
+          return
+        }
+        if (buf.length < 4 + len) return
+        const payload = buf.subarray(4, 4 + len).toString('utf8')
+        buf = buf.subarray(4 + len)
+        onChange(payload)
+      }
+    }
+    child.stdout.on('data', feed)
+    // adb 偶尔往 stderr 打提示信息，只收集不处理（排障用）
+    child.on('error', onError)
+    return child
   }
 
   /** List devices. Returns an empty array on failure. */

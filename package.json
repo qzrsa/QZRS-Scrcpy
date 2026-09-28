@@ -10,6 +10,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "verify": "npm run typecheck && node ../.workbuddy/scripts/verify-subnets.cjs && node ../.workbuddy/scripts/verify-device-history.cjs && node ../.workbuddy/scripts/verify-theme-vars.cjs",
     "dist": "npm run build && electron-builder --dir",
     "dist:dir": "electron-builder --dir"
   },
@@ -40,9 +41,19 @@
     ],
     "extraResources": [
       { "from": "adb", "to": "adb" },
-      { "from": "scrcpy", "to": "scrcpy" },
+      {
+        "from": "scrcpy",
+        "to": "scrcpy",
+        "filter": [
+          "**/*",
+          "!adb.exe",
+          "!AdbWinApi.dll",
+          "!AdbWinUsbApi.dll"
+        ]
+      },
       { "from": "resources/scrcpy-server", "to": "scrcpy-server" }
     ],
+    "electronLanguages": ["zh-CN", "en-US"],
     "asarUnpack": [
       "**/*.node"
     ],

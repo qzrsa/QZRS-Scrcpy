@@ -292,7 +292,9 @@ export class H264Player {
 
   constructor(canvas: HTMLCanvasElement, opts?: { acceleration?: DecoderAcceleration }) {
     this.canvas = canvas
-    this.ctx = canvas.getContext('2d')
+    // alpha:false：视频画布不需要透明通道，跳过合成可省一次混合；
+    // desynchronized:true：提示浏览器走低延迟呈现路径（允许跳过 vsync 队列）。
+    this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true })
     this.acceleration = opts?.acceleration ?? 'auto'
   }
 

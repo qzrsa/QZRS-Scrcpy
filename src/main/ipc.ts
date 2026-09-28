@@ -7,6 +7,7 @@ import { AdbClient, deepScanSubnets, fastScanSubnets, scanLanAdb } from './adb'
 import { mergeDeviceHistory } from './devices'
 import { ScrcpySession } from './session'
 import { Store } from './stores'
+import { themeBackground } from './theme'
 import { findAdb, findServer, findScrcpy } from './util'
 import type {
   DeviceInfo,
@@ -41,6 +42,13 @@ export function registerIpc(store: Store): AppManager {
   let lastDevicesJson = ''
   let pollTimer: NodeJS.Timeout | null = null
   let statsTimer: NodeJS.Timeout | null = null
+  // ---- adb track-devices 长连接监听（替代 3s 轮询）----
+  let deviceWatcher: ChildProcess | null = null
+  let watcherRestartTimer: NodeJS.Timeout | null = null
+  let watcherHealthTimer: NodeJS.Timeout | null = null
+  let watcherFails = 0
+  // 连接建立后 adb 会立刻推一次当前设备列表；等不到就视为监听失败
+  let watcherGotData = false
   const statsPrev = new Map<string, { bytes: number; time: number }>()
 
   function ensureAdb(): AdbClient {
@@ -107,10 +115,111 @@ export function registerIpc(store: Store): AppManager {
     }
   }
 
+  // ---- device watcher (adb track-devices) ----
+  /** 监听推送节流：状态剧变（如 tcpip 切换）时 adb 会连发多条消息，合并成一次刷新。 */
+  let watcherRefreshTimer: NodeJS.Timeout | null = null
+
+  function startDeviceWatcher(): void {
+    if (deviceWatcher || watcherRestartTimer || pollTimer) return
+    let a: AdbClient
+    try {
+      a = ensureAdb()
+    } catch {
+      // adb 路径没配好：退回 3s 轮询（refreshDevices 的 catch 会把历史设备列出来）
+      startPolling()
+      return
+    }
+    watcherGotData = false
+    try {
+      deviceWatcher = a.trackDevices(
+        () => {
+          if (!watcherGotData) {
+            watcherGotData = true
+            watcherFails = 0
+            if (watcherHealthTimer) {
+              clearTimeout(watcherHealthTimer)
+              watcherHealthTimer = null
+            }
+          }
+          // 100ms 节流：把连续多条推送合并成一次 refreshDevices
+          if (watcherRefreshTimer) return
+          watcherRefreshTimer = setTimeout(() => {
+            watcherRefreshTimer = null
+            void refreshDevices()
+          }, 100)
+        },
+        () => scheduleWatcherRestart()
+      )
+    } catch {
+      deviceWatcher = null
+      startPolling()
+      return
+    }
+    // 进程退出（adb server 被杀等）→ 自动重启监听
+    deviceWatcher.once('close', () => {
+      if (deviceWatcher) {
+        deviceWatcher = null
+        scheduleWatcherRestart()
+      }
+    })
+    // 5 秒内一条消息都没收到（连接建立时必推当前列表）→ 判定失败
+    watcherHealthTimer = setTimeout(() => {
+      watcherHealthTimer = null
+      if (!watcherGotData) {
+        killWatcher()
+        watcherFails += 1
+        if (watcherFails >= 3) {
+          startPolling() // 连续 3 次起不来，永久退回轮询
+        } else {
+          scheduleWatcherRestart()
+        }
+      }
+    }, 5000)
+    void refreshDevices()
+  }
+
+  function killWatcher(): void {
+    if (watcherHealthTimer) {
+      clearTimeout(watcherHealthTimer)
+      watcherHealthTimer = null
+    }
+    if (deviceWatcher) {
+      const w = deviceWatcher
+      deviceWatcher = null
+      w.removeAllListeners()
+      try {
+        w.kill()
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  function scheduleWatcherRestart(): void {
+    if (watcherRestartTimer || pollTimer) return
+    watcherRestartTimer = setTimeout(() => {
+      watcherRestartTimer = null
+      startDeviceWatcher()
+    }, 2000)
+  }
+
+  /** 停止监听并重启（adb 路径变了等场景），监听失败则退回轮询。 */
+  function restartDeviceWatcher(): void {
+    killWatcher()
+    stopPolling()
+    startDeviceWatcher()
+  }
+
   // ---- realtime stats sampling ----
+  // 只在有活跃会话时运行：0 会话时空转没有意义（此前是启动即常驻每秒 tick）。
   function startStatsPolling(): void {
     if (statsTimer) return
     statsTimer = setInterval(() => {
+      if (sessions.size === 0) {
+        // 兜底：会话全没了就把自己停掉
+        stopStatsPolling()
+        return
+      }
       for (const [sid, h] of sessions) {
         const s = h.session.getStats()
         const prev = statsPrev.get(sid)
@@ -153,6 +262,7 @@ export function registerIpc(store: Store): AppManager {
     const session = new ScrcpySession(sessionId, a, serial, opts, serverPath, {
       onStarted: (info) => {
         sessions.set(sessionId, { session, serial })
+        startStatsPolling()
         send('session:state', { sessionId, state: 'started', serial, deviceName: info.deviceName, width: info.width, height: info.height } satisfies SessionStateEvent)
         log(`[${info.deviceName}] 已连接，视频 ${info.width}x${info.height}`)
       },
@@ -166,11 +276,13 @@ export function registerIpc(store: Store): AppManager {
       onStopped: (sid) => {
         const serial = sessions.get(sid)?.serial ?? ''
         sessions.delete(sid)
+        if (sessions.size === 0) stopStatsPolling()
         send('session:state', { sessionId: sid, serial, state: 'stopped' } satisfies SessionStateEvent)
       },
       onError: (sid, message) => {
         const serial = sessions.get(sid)?.serial ?? ''
         sessions.delete(sid)
+        if (sessions.size === 0) stopStatsPolling()
         send('session:state', { sessionId: sid, serial, state: 'error', message } satisfies SessionStateEvent)
         log(`[错误] ${message}`)
       },
@@ -281,6 +393,7 @@ export function registerIpc(store: Store): AppManager {
     const h = sessions.get(sessionId)
     if (h) await h.session.stop()
     sessions.delete(sessionId)
+    if (sessions.size === 0) stopStatsPolling()
   })
 
   // ---- external scrcpy fallback ----
@@ -302,6 +415,15 @@ export function registerIpc(store: Store): AppManager {
     try {
       // 注意：scrcpy 的 --no-control 是布尔开关（不接受参数），默认就启用控制，
       // 不要传 --no-control=false（会报 "option doesn't take an argument" 导致秒退）。
+      // 打包版裁掉了 scrcpy/ 里重复的 adb.exe（省 8.2MB），所以把自带 adb 的目录
+      // 注入 PATH 并设置 ADB 环境变量，让 scrcpy.exe 能找到 adb。
+      const selfAdb = findAdb(settings.adbPath)
+      const adbDir = selfAdb ? dirname(selfAdb) : ''
+      const env: NodeJS.ProcessEnv = { ...process.env }
+      if (selfAdb) {
+        env['ADB'] = selfAdb
+        env['PATH'] = `${dirname(selfAdb)};${process.env['PATH'] ?? ''}`
+      }
       const proc = spawn(
         exe,
         ['-s', serial, '--window-title', `QZRS Scrcpy - ${serial}`],
@@ -309,7 +431,8 @@ export function registerIpc(store: Store): AppManager {
           windowsHide: false,
           stdio: 'ignore',
           detached: false,
-          cwd: dirname(exe)
+          cwd: dirname(exe),
+          env
         }
       )
       externalScrcpys.set(serial, proc)
@@ -387,6 +510,13 @@ export function registerIpc(store: Store): AppManager {
     // re-resolve adb/server if path changed
     adb = null
     adbPath = ''
+    // 窗口底色跟随主题（浅色模式下不能还是深色）
+    const bg = themeBackground(s.theme)
+    for (const w of BrowserWindow.getAllWindows()) {
+      if (!w.isDestroyed()) w.setBackgroundColor(bg)
+    }
+    // adb 路径可能变了：按新路径重启 track-devices 监听（失败自动退回轮询）
+    restartDeviceWatcher()
   })
   ipcMain.handle('settings:resolvePaths', () => {
     try {
@@ -606,13 +736,21 @@ export function registerIpc(store: Store): AppManager {
     }
   })
 
-  startPolling()
-  startStatsPolling()
+  startDeviceWatcher()
   log('应用已启动')
 
   return {
     async dispose() {
+      killWatcher()
       stopPolling()
+      if (watcherRestartTimer) {
+        clearTimeout(watcherRestartTimer)
+        watcherRestartTimer = null
+      }
+      if (watcherRefreshTimer) {
+        clearTimeout(watcherRefreshTimer)
+        watcherRefreshTimer = null
+      }
       stopStatsPolling()
       for (const h of sessions.values()) {
         await h.session.stop()
