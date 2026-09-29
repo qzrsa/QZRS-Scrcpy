@@ -1,4 +1,4 @@
-import { useState, useCallback, type MouseEvent } from 'react'
+import { useState, useCallback, useRef, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react'
 import type { DeviceInfo } from '@shared/types'
 import { useApp } from '../store'
 import { IconRefresh, IconWifi, IconUsb, IconPhone, IconPlay, IconSettings } from './icons'
@@ -16,6 +16,11 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
   const { devices, sessions, refreshDevices, stopSession } = useApp()
   const [busy, setBusy] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
+  // 行内重命名：renaming = 正在编辑的卡片
+  const [renaming, setRenaming] = useState<{ serial: string; value: string } | null>(null)
+  // 拖动排序状态：dragOver 记录目标卡片与插入位置（上半=前面，下半=后面）
+  const dragSerialRef = useRef<string | null>(null)
+  const [dragOver, setDragOver] = useState<{ serial: string; pos: 'before' | 'after' } | null>(null)
   // 稳定引用：ContextMenu 的 document 监听依赖它，每次渲染换新函数会反复重订阅
   const closeMenu = useCallback(() => setMenu(null), [])
 
@@ -53,6 +58,73 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
     if (!r.ok) alert(r.message || '删除设备失败')
   }
 
+  const startRename = (d: DeviceInfo): void => {
+    setRenaming({ serial: d.serial, value: d.alias || d.model || '' })
+  }
+
+  const commitRename = async (): Promise<void> => {
+    const r = renaming
+    if (!r) return
+    setRenaming(null)
+    const res = await window.api.renameDevice(r.serial, r.value)
+    if (!res.ok) alert(res.message || '重命名失败')
+  }
+
+  const onRenameKey = (e: KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      void commitRename()
+    } else if (e.key === 'Escape') {
+      e.preventDefault()
+      setRenaming(null)
+    }
+    e.stopPropagation()
+  }
+
+  /** 把拖动的设备插到目标前/后，把完整顺序发主进程持久化（mergeDeviceHistory 按 order 排） */
+  const reorderTo = async (targetSerial: string, pos: 'before' | 'after'): Promise<void> => {
+    const drag = dragSerialRef.current
+    dragSerialRef.current = null
+    setDragOver(null)
+    if (!drag || drag === targetSerial) return
+    const serials = devices.map((d) => d.serial)
+    const from = serials.indexOf(drag)
+    if (from < 0 || !serials.includes(targetSerial)) return
+    serials.splice(from, 1)
+    // 删除后再重算目标位置（from 在 to 之前时，目标会前移一位）
+    const to = serials.indexOf(targetSerial) + (pos === 'after' ? 1 : 0)
+    serials.splice(to, 0, drag)
+    const r = await window.api.reorderDevices(serials)
+    if (!r.ok) alert(r.message || '排序失败')
+  }
+
+  const onCardDragStart = (e: DragEvent<HTMLDivElement>, serial: string): void => {
+    dragSerialRef.current = serial
+    e.dataTransfer.effectAllowed = 'move'
+    // Firefox 需要 setData 才会进入拖动
+    e.dataTransfer.setData('text/plain', serial)
+  }
+
+  const onCardDragOver = (e: DragEvent<HTMLDivElement>, serial: string): void => {
+    if (!dragSerialRef.current || dragSerialRef.current === serial) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'move'
+    const rect = e.currentTarget.getBoundingClientRect()
+    const pos: 'before' | 'after' = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before'
+    if (dragOver?.serial !== serial || dragOver.pos !== pos) setDragOver({ serial, pos })
+  }
+
+  const onCardDrop = (e: DragEvent<HTMLDivElement>, serial: string): void => {
+    e.preventDefault()
+    const pos = dragOver?.serial === serial ? dragOver.pos : 'before'
+    void reorderTo(serial, pos)
+  }
+
+  const onCardDragEnd = (): void => {
+    dragSerialRef.current = null
+    setDragOver(null)
+  }
+
   /** 右键菜单：原设备行右侧的「显示器+播放」图标按钮已收进这里 */
   const openMenu = (e: MouseEvent<HTMLDivElement>, d: DeviceInfo): void => {
     e.preventDefault()
@@ -62,6 +134,12 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
     const isTcpip = /:\d+$/.test(d.serial)
     const running = runningFor(d.serial)
     const items: MenuItem[] = [
+      {
+        key: 'rename',
+        label: d.alias ? '重命名' : '重命名（别名）',
+        hint: d.alias ? `当前别名「${d.alias}」，清空输入并回车 = 恢复默认名称` : '设置一个自定义名称，方便识别是哪台设备',
+        onClick: () => startRename(d)
+      },
       {
         key: 'scrcpy',
         label: '通过 Scrcpy 打开',
@@ -137,11 +215,21 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
           const running = runningFor(d.serial)
           const isBusy = busy === d.serial
           const isSelected = activeSessionSerial === d.serial
+          const isRenaming = renaming?.serial === d.serial
+          const displayName = d.alias || d.model || d.serial
           return (
             <div
               key={d.serial}
-              className={`device-card ${isSelected ? 'active' : ''} ${d.known ? 'known' : ''}`}
+              className={`device-card ${isSelected ? 'active' : ''} ${d.known ? 'known' : ''} ${
+                dragOver?.serial === d.serial ? `drag-over-${dragOver.pos}` : ''
+              }`}
+              draggable={!isRenaming}
+              onDragStart={(e) => onCardDragStart(e, d.serial)}
+              onDragOver={(e) => onCardDragOver(e, d.serial)}
+              onDrop={(e) => onCardDrop(e, d.serial)}
+              onDragEnd={onCardDragEnd}
               onClick={() => {
+                if (isRenaming) return
                 if (d.state === 'device' && !isBusy) onSelect(d.serial)
               }}
               onContextMenu={(e) => openMenu(e, d)}
@@ -155,10 +243,28 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
             >
               <div className={`device-dot ${d.state}`} />
               <div className="device-info">
-                <div className="device-name" title={d.serial}>{d.model || d.serial}</div>
+                {isRenaming ? (
+                  <input
+                    className="text-input device-rename-input"
+                    value={renaming.value}
+                    autoFocus
+                    maxLength={30}
+                    placeholder="别名（留空恢复默认）"
+                    onChange={(e) => setRenaming({ serial: d.serial, value: e.target.value })}
+                    onKeyDown={onRenameKey}
+                    onBlur={() => void commitRename()}
+                    onClick={(e) => e.stopPropagation()}
+                    onContextMenu={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <div className="device-name" title={d.alias ? `${displayName}（${d.serial}）` : d.serial}>
+                    {displayName}
+                  </div>
+                )}
                 <div className="device-serial">
                   {d.transport === 'tcpip' ? <IconWifi width={11} height={11} /> : <IconUsb width={11} height={11} />}
                   {d.serial}
+                  {d.alias && <span className="device-tag">已命名</span>}
                   {d.known && <span className="device-tag">历史</span>}
                 </div>
               </div>

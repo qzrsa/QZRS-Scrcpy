@@ -10,6 +10,10 @@ export interface DeviceInfo {
   product: string | null
   transport: string | null // 'usb' | 'local' | 'tcpip'
   /**
+   * 用户自定义别名（右键「重命名」设置）。UI 显示优先级：alias > model > serial。
+   */
+  alias?: string | null
+  /**
    * true = 该条目仅来自历史记录（当前未连接，`adb devices` 里没有）。
    * 主进程 refreshDevices() 会把历史设备以 state='offline' 合并进列表，
    * 渲染层据此置灰显示并给出「历史」标记。
@@ -27,6 +31,10 @@ export interface DeviceHistoryEntry {
   transport: string | null
   /** 最近一次看到该设备在线的时间（epoch ms），用于「最近在前」排序 */
   lastSeen: number
+  /** 用户自定义别名（右键重命名）；空/缺省 = 未命名 */
+  alias?: string | null
+  /** 用户拖动排序的序号（0 起）；缺省 = 未排序，排在有 order 的设备之后 */
+  order?: number
 }
 
 export type VideoCodec = 'h264' | 'h265' | 'av1'

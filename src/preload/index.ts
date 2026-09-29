@@ -20,6 +20,12 @@ const api = {
   disconnectDevice: (hostPort: string): Promise<OpResult> => ipcRenderer.invoke('device:disconnect', hostPort),
   /** 从历史设备列表里删除（tcpip 设备会先 adb disconnect，避免轮询立刻写回） */
   forgetDevice: (serial: string): Promise<OpResult> => ipcRenderer.invoke('devices:forget', serial),
+  /** 重命名设备（用户别名；空串 = 清除别名） */
+  renameDevice: (serial: string, alias: string): Promise<OpResult> =>
+    ipcRenderer.invoke('devices:rename', serial, alias),
+  /** 设备列表拖动排序：把拖完后的完整 serial 顺序发回主进程持久化 */
+  reorderDevices: (orderedSerials: string[]): Promise<OpResult> =>
+    ipcRenderer.invoke('devices:reorder', orderedSerials),
   setTcpip: (serial: string, port: number): Promise<OpResult> => ipcRenderer.invoke('device:tcpip', serial, port),
   scanLanDevices: (
     port?: number,

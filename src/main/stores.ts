@@ -191,7 +191,15 @@ export class Store {
       const transport = d.transport ?? old.transport
       if (model !== old.model || transport !== old.transport) structural = true
       if (now - old.lastSeen >= HISTORY_TOUCH_THROTTLE_MS) touched = true
-      map.set(d.serial, { serial: d.serial, model, transport, lastSeen: Math.max(old.lastSeen, now) })
+      // alias / order 是用户自定义数据，必须原样保留（防止轮询合并时被洗掉）
+      map.set(d.serial, {
+        serial: d.serial,
+        model,
+        transport,
+        lastSeen: Math.max(old.lastSeen, now),
+        alias: old.alias,
+        order: old.order
+      })
     }
 
     const list = [...map.values()].sort((a, b) => b.lastSeen - a.lastSeen).slice(0, MAX_DEVICE_HISTORY)
@@ -202,6 +210,42 @@ export class Store {
   /** 从历史记录中删除一台设备（不碰 adb 连接，由调用方按需 disconnect） */
   forgetDevice(serial: string): DeviceHistoryEntry[] {
     const list = this.getDeviceHistory().filter((d) => d.serial !== serial)
+    writeJson(this.devicesPath, list)
+    return list
+  }
+
+  /**
+   * 重命名设备（用户别名）。alias 为空串 = 清除别名。
+   * structural=true 立即写盘：别名是用户主动操作，必须马上持久化。
+   */
+  renameDevice(serial: string, alias: string): DeviceHistoryEntry[] {
+    const trimmed = alias.trim().slice(0, 30)
+    const list = this.getDeviceHistory().map((d) => {
+      if (d.serial !== serial) return d
+      const next: DeviceHistoryEntry = { ...d }
+      if (trimmed) next.alias = trimmed
+      else delete next.alias
+      return next
+    })
+    writeJson(this.devicesPath, list)
+    return list
+  }
+
+  /**
+   * 拖动排序：按传入的 serial 顺序写 order = 0..n-1。
+   * 没出现在列表里的历史条目清除 order（它们会排在有 order 的设备之后，按在线优先/lastSeen）。
+   */
+  setDeviceOrder(orderedSerials: string[]): DeviceHistoryEntry[] {
+    const orderMap = new Map(orderedSerials.map((s, i) => [s, i]))
+    const list = this.getDeviceHistory().map((d) => {
+      if (!orderMap.has(d.serial)) {
+        if (d.order === undefined) return d
+        const next: DeviceHistoryEntry = { ...d }
+        delete next.order
+        return next
+      }
+      return { ...d, order: orderMap.get(d.serial) }
+    })
     writeJson(this.devicesPath, list)
     return list
   }

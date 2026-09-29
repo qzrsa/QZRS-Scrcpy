@@ -346,6 +346,29 @@ export function registerIpc(store: Store): AppManager {
   ipcMain.handle('devices:list', () => refreshDevices())
   ipcMain.handle('devices:refresh', () => refreshDevices())
 
+  // 重命名设备（用户别名；空串 = 清除）。立即写盘并刷新列表。
+  ipcMain.handle('devices:rename', async (_e, serial: string, alias: string) => {
+    try {
+      store.renameDevice(String(serial), String(alias ?? ''))
+      await refreshDevices()
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // 拖动排序：渲染层把拖完的完整 serial 顺序发过来，主进程写 order 并刷新
+  ipcMain.handle('devices:reorder', async (_e, orderedSerials: unknown) => {
+    try {
+      if (!Array.isArray(orderedSerials)) return { ok: false, message: '参数错误' }
+      store.setDeviceOrder(orderedSerials.map(String))
+      await refreshDevices()
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   // 扫描局域网内开放 adb 端口的设备（adb tcpip 模式不发 mDNS 广播，只能扫端口）
   // allSubnets=true 时额外连虚拟机/虚拟网卡网段一起扫（慢很多，按需开启）；回环两种模式都会扫
   ipcMain.handle('devices:scan', async (_e, port?: number, allSubnets?: boolean) => {
