@@ -8,9 +8,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
   const [draft, setDraft] = useState<AppSettings>(settings)
   const [resolved, setResolved] = useState<{ adbPath: string; serverPath: string; scrcpyPath: string } | null>(null)
   const [hevc, setHevc] = useState<'checking' | 'yes' | 'no'>('checking')
+  const [logDir, setLogDir] = useState<string>('')
 
   useEffect(() => {
     void window.api.resolvePaths().then(setResolved)
+    void window.api.getDebugLogDir().then(setLogDir).catch(() => undefined)
   }, [])
 
   // 检测内核是否支持 HEVC(H.265) 硬解（依赖主进程开启的 PlatformHEVCDecoderSupport）。
@@ -208,6 +210,18 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         </select>
         <div className="hint">覆盖层：适合投屏小窗；系统级全屏：按 F12 让窗口独占整个显示器（含任务栏消失）</div>
       </div>
+
+      <div className="field row between">
+        <label style={{ margin: 0 }}>调试时写入日志文件</label>
+        <Toggle checked={draft.debugLogToFile} onChange={(v) => patch({ debugLogToFile: v })} />
+      </div>
+      {draft.debugLogToFile && (
+        <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+          打开调试模式（工具栏「D」开关）后，触控坐标/按键映射日志会追加写入：
+          <br />
+          <code style={{ userSelect: 'all' }}>{logDir || '…'}\&lt;日期&gt;.log</code>
+        </div>
+      )}
 
       <div className="row" style={{ marginTop: 20 }}>
         <button className="btn btn-primary btn-block" onClick={save}>

@@ -144,6 +144,8 @@ export interface AppSettings {
   /** fullscreen mode: 'overlay' = CSS overlay (sidebar+toolbar hidden, window stays);
    *  'window' = system-level fullscreen (requestFullscreen) or maximize via IPC. */
   fullscreenMode: 'overlay' | 'window'
+  /** 调试模式开启时是否把调试日志写入安装目录/logs/<日期>.log（默认关） */
+  debugLogToFile: boolean
 }
 
 /**

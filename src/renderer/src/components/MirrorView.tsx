@@ -18,6 +18,8 @@ interface Props {
   editing?: boolean
   /** show the rolling input debug log overlay (off by default) */
   debug?: boolean
+  /** 调试日志写入文件（设置「调试时写入日志文件」；仍需 debug 打开才生效） */
+  fileLog?: boolean
   /** called when the editor requests to close (save or cancel) */
   onEditClose?: () => void
   onKeymapChange?: (k: KeymapConfig) => void
@@ -39,6 +41,7 @@ export function MirrorView({
   keymap,
   editing,
   debug,
+  fileLog,
   onEditClose,
   onKeymapChange
 }: Props): JSX.Element {
@@ -65,13 +68,40 @@ export function MirrorView({
   keymapRef.current = keymap
   /** debug state: rolling log of the last key events / touch commands sent (only when `debug`) */
   const [debugLines, setDebugLines] = useState<string[]>([])
+  // 调试日志落盘：debug && 设置「调试时写入日志文件」同时开时，缓冲调试行，~1s 批量发主进程写文件
+  const fileLogBufRef = useRef<string[]>([])
+  const fileLogActiveRef = useRef(false)
+  fileLogActiveRef.current = !!(debug && fileLog && session)
+  const serialRef = useRef('')
+  serialRef.current = session?.serial ?? ''
   const pushDebug = useCallback(
     (line: string): void => {
       if (!debug) return
+      if (fileLogActiveRef.current) {
+        // 每行带 serial 前缀：多设备日志写进同一份按天文件时仍可区分来源
+        fileLogBufRef.current.push(`[${serialRef.current}] ${line}`)
+        // 上限保护：IPC 通道万一阻塞也不至于无限膨胀
+        if (fileLogBufRef.current.length > 2000) {
+          fileLogBufRef.current.splice(0, fileLogBufRef.current.length - 2000)
+        }
+      }
       setDebugLines((prev) => [...prev, line].slice(-6))
     },
     [debug]
   )
+  // 定时批量落盘；开关关闭/视图卸载时把缓冲里剩余的行立即发走
+  useEffect(() => {
+    if (!(debug && fileLog)) return
+    const flush = (): void => {
+      if (fileLogBufRef.current.length === 0) return
+      window.api.debugLog(fileLogBufRef.current.splice(0))
+    }
+    const t = window.setInterval(flush, 1000)
+    return () => {
+      window.clearInterval(t)
+      flush()
+    }
+  }, [debug, fileLog])
 
   // (Re)create the decoder whenever the active session changes.
   useEffect(() => {

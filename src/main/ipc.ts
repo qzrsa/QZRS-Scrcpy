@@ -6,7 +6,8 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { AdbClient, deepScanSubnets, fastScanSubnets, scanLanAdb } from './adb'
 import { mergeDeviceHistory } from './devices'
 import { ScrcpySession } from './session'
-import { Store } from './stores'
+import { Store, debugLogDirCandidates } from './stores'
+import { DebugFileLogger } from './debuglog'
 import { themeBackground } from './theme'
 import { findAdb, findServer, findScrcpy } from './util'
 import type {
@@ -42,6 +43,8 @@ export function registerIpc(store: Store): AppManager {
   let lastDevicesJson = ''
   let pollTimer: NodeJS.Timeout | null = null
   let statsTimer: NodeJS.Timeout | null = null
+  // 调试日志落盘器（设置「调试时写入日志文件」+ 调试开关同时打开才会真正写入）
+  const debugLogger = new DebugFileLogger(debugLogDirCandidates())
   // ---- adb track-devices 长连接监听（替代 3s 轮询）----
   let deviceWatcher: ChildProcess | null = null
   let watcherRestartTimer: NodeJS.Timeout | null = null
@@ -736,11 +739,25 @@ export function registerIpc(store: Store): AppManager {
     }
   })
 
+  // ---- debug log to file ----
+  // 渲染层每 ~1s 批量推一批调试行（MirrorView 的 pushDebug 缓冲）；目录在首次写入时按需创建。
+  ipcMain.on('debug:log', (_e, lines: unknown) => {
+    if (!Array.isArray(lines)) return
+    for (const l of lines) {
+      if (typeof l === 'string' && l.length > 0) debugLogger.write(l)
+    }
+  })
+  // 设置面板展示日志目录用：优先返回已确定/首选候选
+  ipcMain.handle('debug:logdir', () => debugLogger.dir ?? debugLogDirCandidates()[0])
+
+  // ---- debug log to file (end) ----
+
   startDeviceWatcher()
   log('应用已启动')
 
   return {
     async dispose() {
+      debugLogger.flushSync()
       killWatcher()
       stopPolling()
       if (watcherRestartTimer) {

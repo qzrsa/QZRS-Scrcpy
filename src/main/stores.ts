@@ -17,6 +17,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   groupControl: false,
   activeKeymapId: null,
   fullscreenMode: 'overlay' as const,
+  debugLogToFile: false,
   session: {
     bitRate: 8000000,
     maxFps: 0,
@@ -63,6 +64,16 @@ function writeJson(path: string, value: unknown): void {
 function installRoot(): string {
   if (app.isPackaged) return dirname(process.resourcesPath)
   return app.getAppPath()
+}
+
+/**
+ * 调试日志目录候选（按优先级）：
+ * 1. 安装目录/logs（软件目录下，绿色版随目录走）
+ * 2. userData/logs（安装目录不可写时的兜底，如 Program Files 无管理员权限）
+ * 只计算路径，不建目录——目录由 DebugFileLogger 在首次写入时按需创建。
+ */
+export function debugLogDirCandidates(): string[] {
+  return [join(installRoot(), 'logs'), join(dataDir(), 'logs')]
 }
 
 /** 文件名安全化：防止 id 里出现路径分隔符等非法字符 */

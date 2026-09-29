@@ -80,6 +80,10 @@ const api = {
     message?: string
   }> => ipcRenderer.invoke('keymaps:import'),
   openKeymapsDir: (): Promise<{ ok: boolean; dir?: string }> => ipcRenderer.invoke('keymaps:openDir'),
+  /** 调试日志批量落盘（fire-and-forget；主进程在设置开启+调试打开时才会真正建目录写文件） */
+  debugLog: (lines: string[]): void => ipcRenderer.send('debug:log', lines),
+  /** 调试日志目录（设置面板展示用） */
+  getDebugLogDir: (): Promise<string> => ipcRenderer.invoke('debug:logdir'),
   writeClipboard: (text: string): void => ipcRenderer.send('clipboard:write', text),
   readClipboard: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
 

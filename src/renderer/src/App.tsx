@@ -276,6 +276,7 @@ export default function App(): JSX.Element {
             keymap={activeKeymap}
             editing={keymapEditing}
             debug={debugOverlay}
+            fileLog={settings.debugLogToFile}
             onEditClose={() => setKeymapEditing(false)}
             onKeymapChange={handleKeymapChange}
           />
