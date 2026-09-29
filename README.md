@@ -1,8 +1,8 @@
 # QZRS Scrcpy
 
-一个现代、独立的 PC 端 Android 投屏与控制客户端。基于 Electron + React + TypeScript，**从零独立实现 scrcpy 4.1 协议**UI 经过重新设计，支持多设备群控、键鼠操作、截屏录屏、剪贴板同步、按键映射、文件传输与 ADB 终端。
+一个现代、独立的 PC 端 Android 投屏与控制客户端。基于 Electron + React + TypeScript，**按 scrcpy 4.1 的开源协议规范独立实现了 PC 端**（未复用 scrcpy 客户端源码，设备端复用官方 scrcpy-server），UI 经过重新设计，支持多设备群控、键鼠操作、截屏录屏、剪贴板同步、按键映射、脚本自动化、文件传输与 ADB 终端。
 
-> 协议完全自研：`adb push → adb forward → app_process 启动 Server → 三路 socket（video/control）→ WebCodecs 解码 H.264`。
+> 工作链路：`adb push → adb forward → app_process 启动官方 scrcpy-server → 三路 socket（video/control）→ WebCodecs 解码 H.264`。
 
 ## 功能特性
 
@@ -23,7 +23,7 @@
 - **Electron 44** + **electron-vite 5** + **Vite 7**
 - **React 19** + **TypeScript 7**
 - **WebCodecs `VideoDecoder`**（H.264 Annex-B → AVCC，avcC description）
-- 自研协议层（`src/main/session.ts`、`src/main/protocol.ts`、`src/renderer/src/decoder/h264.ts`）
+- 协议层为独立实现（`src/main/session.ts`、`src/main/protocol.ts`、`src/renderer/src/decoder/h264.ts`），协议规范来自开源项目 [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy)
 
 ## 环境要求
 
@@ -92,6 +92,11 @@ src/
 │   └── store.tsx    # 状态管理
 └── shared/types.ts  # 主/渲染进程共享类型
 ```
+
+## 致谢
+
+- [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy)（Apache-2.0）：本项目的设备端直接使用官方 `scrcpy-server`，PC 端协议实现也基于其公开的协议规范——没有这个优秀的开源项目就没有本项目。
+- [adb（Android platform-tools）](https://developer.android.com/tools/adb)：设备连接与文件传输基础。
 
 ## License
 
