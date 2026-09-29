@@ -276,8 +276,8 @@ export class AdbClient {
     return out
   }
 
-  async connect(hostPort: string): Promise<AdbShellResult> {
-    return this.exec(['connect', hostPort])
+  async connect(hostPort: string, timeoutMs = 30000): Promise<AdbShellResult> {
+    return this.exec(['connect', hostPort], timeoutMs)
   }
 
   async disconnect(hostPort: string): Promise<AdbShellResult> {

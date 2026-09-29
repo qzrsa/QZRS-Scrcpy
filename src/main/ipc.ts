@@ -89,6 +89,9 @@ export function registerIpc(store: Store): AppManager {
     return mergeDeviceHistory(live, store.rememberDevices(live))
   }
 
+  // 当前 adb 在线的 serial 集合（自动重连用来判断哪些历史设备真的离线）
+  let lastLiveSerials = new Set<string>()
+
   async function refreshDevices(): Promise<DeviceInfo[]> {
     let live: DeviceInfo[] = []
     try {
@@ -96,6 +99,7 @@ export function registerIpc(store: Store): AppManager {
     } catch {
       /* adb 不可用时至少把历史设备列出来 */
     }
+    lastLiveSerials = new Set(live.map((d) => d.serial))
     const list = refreshWithHistory(live)
     const json = JSON.stringify(list)
     if (json !== lastDevicesJson) {
@@ -103,6 +107,42 @@ export function registerIpc(store: Store): AppManager {
       send('devices:changed', list)
     }
     return list
+  }
+
+  // ---- 历史 tcpip 设备自动重连 ----
+  // 历史设备在应用重启后 adb 不会自动连回，列表里一直是灰色（state=offline），
+  // 用户每次都得右键「重新连接」。这里自动补：启动时连一次 + 每 30s 对仍离线的
+  // tcpip 历史设备静默重试（手机后上线/换网也能自动恢复）。USB 设备插上即在线，不参与。
+  let reconnectBusy = false
+  let reconnectTimer: NodeJS.Timeout | null = null
+
+  async function autoReconnectHistory(): Promise<void> {
+    if (reconnectBusy) return
+    reconnectBusy = true
+    try {
+      let a: AdbClient
+      try {
+        a = ensureAdb()
+      } catch {
+        return // adb 路径没配好，等下次
+      }
+      // 只补 tcpip 历史（serial 形如 10.126.126.111:5555）且当前不在线的
+      const targets = store
+        .getDeviceHistory()
+        .filter((h) => /^[0-9.]+:\d+$/.test(h.serial) && !lastLiveSerials.has(h.serial))
+      if (targets.length === 0) return
+      // 并发 connect；单次 10s 上限，避免不可达 IP 长时间挂住
+      await Promise.all(targets.map((h) => a.connect(h.serial, 10000).catch(() => null)))
+      await refreshDevices() // connect 是幂等的（已连接立即返回），刷新走 diff，不会惊动 UI
+    } finally {
+      reconnectBusy = false
+    }
+  }
+
+  function startAutoReconnect(): void {
+    if (reconnectTimer) return
+    void autoReconnectHistory()
+    reconnectTimer = setInterval(() => void autoReconnectHistory(), 30000)
   }
 
   function startPolling(): void {
@@ -753,6 +793,7 @@ export function registerIpc(store: Store): AppManager {
   // ---- debug log to file (end) ----
 
   startDeviceWatcher()
+  startAutoReconnect()
   log('应用已启动')
 
   return {
@@ -760,6 +801,10 @@ export function registerIpc(store: Store): AppManager {
       debugLogger.flushSync()
       killWatcher()
       stopPolling()
+      if (reconnectTimer) {
+        clearInterval(reconnectTimer)
+        reconnectTimer = null
+      }
       if (watcherRestartTimer) {
         clearTimeout(watcherRestartTimer)
         watcherRestartTimer = null
