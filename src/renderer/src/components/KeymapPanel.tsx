@@ -205,20 +205,14 @@ export function KeymapPanel({ onClose, onOpenVisualEditor, onToast }: Props): JS
               />
               <div className="row" style={{ gap: 6 }}>
                 <label className="row" style={{ gap: 4, fontSize: 12, color: 'var(--text-faint)' }}>
+                  {/* 用 checkbox 而非 radio：radio 选中后无法反选（onClick+preventDefault 在 React 受控
+                      组件上会被按上次提交状态恢复 DOM，视觉不更新）；checkbox 的勾选/取消直接映射
+                      setActiveId(cfg.id)/setActiveId(null)，排他性由单一 state 天然保证 */}
                   <input
-                    type="radio"
-                    name="active-keymap"
+                    type="checkbox"
                     checked={activeId === cfg.id}
-                    onChange={() => setActiveId(cfg.id)}
-                    // radio 选中后再点自己不会触发 onChange —— 在 onClick 拦截实现「再次点击 = 取消激活」，
-                    // 否则一旦激活就永远回不到「无激活」状态（radio 本性不可反选，也没有别的取消入口）
-                    onClick={(e) => {
-                      if (activeId === cfg.id) {
-                        e.preventDefault()
-                        setActiveId(null)
-                      }
-                    }}
-                    title="勾选激活此方案；再次点击已选中的可取消激活（需保存映射生效）"
+                    onChange={(e) => setActiveId(e.target.checked ? cfg.id : null)}
+                    title="勾选激活此方案；取消勾选即取消激活（需点「保存映射」生效）"
                   />
                   激活
                 </label>
