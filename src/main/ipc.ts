@@ -8,6 +8,7 @@ import { mergeDeviceHistory } from './devices'
 import { ScrcpySession } from './session'
 import { Store, debugLogDirCandidates } from './stores'
 import { DebugFileLogger } from './debuglog'
+import { ScriptEngine } from './scriptengine'
 import { themeBackground } from './theme'
 import { findAdb, findServer, findScrcpy } from './util'
 import type {
@@ -16,6 +17,7 @@ import type {
   ControlCommand,
   AppSettings,
   KeymapConfig,
+  ScriptInfo,
   FrameEvent,
   StreamMeta,
   SessionStateEvent,
@@ -33,6 +35,8 @@ interface SessionHandle {
 
 export function registerIpc(store: Store): AppManager {
   const sessions = new Map<string, SessionHandle>()
+  // 会话当前视频尺寸（脚本引擎把像素坐标换算成协议参数用）：onStarted/onStreamMeta 更新，会话结束清理
+  const videoSizes = new Map<string, { width: number; height: number }>()
   const records = new Map<string, string>() // serial -> remote record path
   // 外部 scrcpy.exe 子进程（serial -> ChildProcess），用于在 WebCodecs 渲染异常时
   // 临时回退到官方 scrcpy 自己的 SDL 窗口看画面（不嵌入，独立窗口）。
@@ -298,6 +302,18 @@ export function registerIpc(store: Store): AppManager {
     statsPrev.clear()
   }
 
+  // ---- script engine ----
+  // 用户 JS 脚本在主进程沙箱里跑，设备操作走与手动控制同一条 sendControl 链路。
+  const scriptEngine = new ScriptEngine({
+    sendControl: (sessionId, cmd) => {
+      const h = sessions.get(sessionId)
+      if (h) h.session.sendControl(cmd)
+    },
+    getVideoSize: (sessionId) => videoSizes.get(sessionId) ?? null,
+    isSessionAlive: (sessionId) => sessions.has(sessionId),
+    onEvent: (evt) => send('script:event', evt)
+  })
+
   // ---- session management ----
   function startSession(serial: string, opts: SessionOptions): { sessionId: string } {
     const a = ensureAdb()
@@ -305,6 +321,7 @@ export function registerIpc(store: Store): AppManager {
     const session = new ScrcpySession(sessionId, a, serial, opts, serverPath, {
       onStarted: (info) => {
         sessions.set(sessionId, { session, serial })
+        videoSizes.set(sessionId, { width: info.width, height: info.height })
         startStatsPolling()
         send('session:state', { sessionId, state: 'started', serial, deviceName: info.deviceName, width: info.width, height: info.height } satisfies SessionStateEvent)
         log(`[${info.deviceName}] 已连接，视频 ${info.width}x${info.height}`)
@@ -314,17 +331,20 @@ export function registerIpc(store: Store): AppManager {
         send('session:frame', evt)
       },
       onStreamMeta: (meta: StreamMeta) => {
+        videoSizes.set(meta.sessionId, { width: meta.width, height: meta.height })
         send('session:meta', meta)
       },
       onStopped: (sid) => {
         const serial = sessions.get(sid)?.serial ?? ''
         sessions.delete(sid)
+        videoSizes.delete(sid)
         if (sessions.size === 0) stopStatsPolling()
         send('session:state', { sessionId: sid, serial, state: 'stopped' } satisfies SessionStateEvent)
       },
       onError: (sid, message) => {
         const serial = sessions.get(sid)?.serial ?? ''
         sessions.delete(sid)
+        videoSizes.delete(sid)
         if (sessions.size === 0) stopStatsPolling()
         send('session:state', { sessionId: sid, serial, state: 'error', message } satisfies SessionStateEvent)
         log(`[错误] ${message}`)
@@ -459,6 +479,7 @@ export function registerIpc(store: Store): AppManager {
     const h = sessions.get(sessionId)
     if (h) await h.session.stop()
     sessions.delete(sessionId)
+    videoSizes.delete(sessionId)
     if (sessions.size === 0) stopStatsPolling()
   })
 
@@ -664,6 +685,66 @@ export function registerIpc(store: Store): AppManager {
     return { ok: true, dir }
   })
 
+  // ---- user scripts（JS 自动化）----
+  ipcMain.handle('scripts:list', () => store.getScripts())
+
+  // 保存脚本（id 为空 = 新建）。name trim + 40 字上限，code 100k 上限（与引擎一致）。
+  ipcMain.handle('scripts:save', (_e, id: string, name: string, code: string) => {
+    try {
+      const trimmedName = String(name ?? '').trim().slice(0, 40) || '未命名脚本'
+      const trimmedCode = String(code ?? '')
+      if (trimmedCode.trim().length === 0) return { ok: false, message: '脚本内容为空' }
+      if (trimmedCode.length > 100_000) return { ok: false, message: '脚本过长（>100000 字符）' }
+      let list = store.getScripts()
+      let scriptId = String(id ?? '').trim()
+      if (scriptId) {
+        if (!list.some((s) => s.id === scriptId)) return { ok: false, message: '脚本不存在（可能已被删除）' }
+        list = list.map((s) => (s.id === scriptId ? { ...s, name: trimmedName, code: trimmedCode, updatedAt: Date.now() } : s))
+      } else {
+        scriptId = `sc${Date.now().toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`
+        list = [...list, { id: scriptId, name: trimmedName, code: trimmedCode, updatedAt: Date.now() }]
+      }
+      const next = store.setScripts(list)
+      return { ok: true, id: scriptId, scripts: next }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('scripts:delete', (_e, id: string) => {
+    try {
+      const next = store.setScripts(store.getScripts().filter((s) => s.id !== String(id)))
+      return { ok: true, scripts: next }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // 运行脚本：渲染层把目标会话 sessionId 发过来（一个脚本同一时间只跑一份）。
+  // 引擎把 started/log/done/stopped/error 通过 'script:event' 推给渲染层。
+  ipcMain.handle('scripts:run', (_e, scriptId: string, sessionId: string) => {
+    try {
+      const script = store.getScripts().find((s) => s.id === String(scriptId))
+      if (!script) return { ok: false, message: '脚本不存在' }
+      const { runId } = scriptEngine.run(script, String(sessionId))
+      return { ok: true, runId }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('scripts:stop', (_e, runId: string) => {
+    scriptEngine.stop(String(runId))
+    return { ok: true }
+  })
+
+  ipcMain.handle('scripts:running', () => scriptEngine.running())
+
+  ipcMain.handle('scripts:openDir', () => {
+    void shell.openPath(store.getScriptsDir())
+    return { ok: true, dir: store.getScriptsDir() }
+  })
+
   // ---- fullscreen ----
   ipcMain.handle('fullscreen:enter', async () => {
     const win = getWin()
@@ -822,6 +903,7 @@ export function registerIpc(store: Store): AppManager {
   return {
     async dispose() {
       debugLogger.flushSync()
+      scriptEngine.stopAll() // 停掉所有运行中的脚本（等价于抬起手指，防止退出后虚拟手指悬挂）
       killWatcher()
       stopPolling()
       if (reconnectTimer) {

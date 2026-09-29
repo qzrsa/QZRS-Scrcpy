@@ -10,7 +10,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
-    "verify": "npm run typecheck && node ../.workbuddy/scripts/verify-subnets.cjs && node ../.workbuddy/scripts/verify-device-history.cjs && node ../.workbuddy/scripts/verify-theme-vars.cjs",
+    "verify": "npm run typecheck && node ../.workbuddy/scripts/verify-subnets.cjs && node ../.workbuddy/scripts/verify-device-history.cjs && node ../.workbuddy/scripts/verify-scripts.cjs && node ../.workbuddy/scripts/verify-theme-vars.cjs",
     "dist": "npm run build && electron-builder --dir",
     "dist:dir": "electron-builder --dir"
   },

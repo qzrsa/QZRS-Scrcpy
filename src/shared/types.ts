@@ -231,3 +231,22 @@ export interface OpResult {
   ok: boolean
   message?: string
 }
+
+/**
+ * 用户脚本（JS 自动化）。持久化在安装目录/scripts/ 下，每个脚本一个 json 文件。
+ * 代码在主进程 node:vm 沙箱里以 async IIFE 执行，顶层可直接 await。
+ */
+export interface ScriptInfo {
+  id: string
+  name: string
+  code: string
+  updatedAt: number
+}
+
+/** 脚本运行事件（主进程 → 渲染层 'script:event' 通道） */
+export type ScriptRunEvent =
+  | { runId: string; scriptId: string; name: string; state: 'started'; sessionId: string }
+  | { runId: string; scriptId: string; name: string; state: 'log'; line: string }
+  | { runId: string; scriptId: string; name: string; state: 'done'; elapsedMs: number }
+  | { runId: string; scriptId: string; name: string; state: 'stopped' }
+  | { runId: string; scriptId: string; name: string; state: 'error'; message: string }

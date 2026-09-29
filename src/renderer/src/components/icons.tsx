@@ -115,6 +115,14 @@ export const IconStop = (p: P): JSX.Element => (
     <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" />
   </svg>
 )
+export const IconTrash = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <path d="M3 6h18" />
+    <path d="M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2" />
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    <path d="M10 11v6M14 11v6" />
+  </svg>
+)
 export const IconCamera = (p: P): JSX.Element => (
   <svg {...base(p)}>
     <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
@@ -137,6 +145,13 @@ export const IconTerminal = (p: P): JSX.Element => (
   <svg {...base(p)}>
     <path d="m4 17 6-6-6-6" />
     <path d="M12 19h8" />
+  </svg>
+)
+export const IconScript = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <path d="m8 7-5 5 5 5" />
+    <path d="m16 7 5 5-5 5" />
+    <path d="m13.5 4-3 16" />
   </svg>
 )
 export const IconUpload = (p: P): JSX.Element => (

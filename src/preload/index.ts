@@ -5,6 +5,8 @@ import type {
   ControlCommand,
   AppSettings,
   KeymapConfig,
+  ScriptInfo,
+  ScriptRunEvent,
   FrameEvent,
   StreamMeta,
   SessionStateEvent,
@@ -86,6 +88,25 @@ const api = {
     message?: string
   }> => ipcRenderer.invoke('keymaps:import'),
   openKeymapsDir: (): Promise<{ ok: boolean; dir?: string }> => ipcRenderer.invoke('keymaps:openDir'),
+  /** ---- 用户脚本（JS 自动化）---- */
+  listScripts: (): Promise<ScriptInfo[]> => ipcRenderer.invoke('scripts:list'),
+  /** 保存脚本；id 为空 = 新建。返回 ok/id/最新列表 */
+  saveScript: (id: string, name: string, code: string): Promise<{ ok: boolean; id?: string; scripts?: ScriptInfo[]; message?: string }> =>
+    ipcRenderer.invoke('scripts:save', id, name, code),
+  deleteScript: (id: string): Promise<{ ok: boolean; scripts?: ScriptInfo[]; message?: string }> =>
+    ipcRenderer.invoke('scripts:delete', id),
+  /** 运行脚本：传目标会话 sessionId（投屏开着才有会话） */
+  runScript: (scriptId: string, sessionId: string): Promise<{ ok: boolean; runId?: string; message?: string }> =>
+    ipcRenderer.invoke('scripts:run', scriptId, sessionId),
+  stopScript: (runId: string): Promise<OpResult> => ipcRenderer.invoke('scripts:stop', runId),
+  runningScripts: (): Promise<Array<{ runId: string; scriptId: string; name: string; sessionId: string }>> =>
+    ipcRenderer.invoke('scripts:running'),
+  openScriptsDir: (): Promise<{ ok: boolean; dir?: string }> => ipcRenderer.invoke('scripts:openDir'),
+  onScriptEvent: (cb: (e: ScriptRunEvent) => void): (() => void) => {
+    const l = (_e: unknown, d: ScriptRunEvent): void => cb(d)
+    ipcRenderer.on('script:event', l)
+    return () => ipcRenderer.removeListener('script:event', l)
+  },
   /** 调试日志批量落盘（fire-and-forget；主进程在设置开启+调试打开时才会真正建目录写文件） */
   debugLog: (lines: string[]): void => ipcRenderer.send('debug:log', lines),
   /** 调试日志目录（设置面板展示用） */

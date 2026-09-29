@@ -8,11 +8,12 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { ConnectDialog } from './components/ConnectDialog'
 import { KeymapPanel } from './components/KeymapPanel'
 import { ToolsPanel } from './components/ToolsPanel'
+import { ScriptPanel } from './components/ScriptPanel'
 import { ClipboardDialog } from './components/ClipboardDialog'
 import { StatsOverlay } from './components/StatsOverlay'
 import { IconPhone, IconFullscreen } from './components/icons'
 
-type Panel = 'settings' | 'keymap' | 'tools'
+type Panel = 'settings' | 'keymap' | 'tools' | 'script'
 
 interface Toast {
   msg: string
@@ -260,6 +261,7 @@ export default function App(): JSX.Element {
           onOpenKeymap={() => setPanel('keymap')}
           onToggleKeymapEdit={handleToggleKeymapEdit}
           onOpenTools={() => setPanel('tools')}
+          onOpenScript={() => setPanel('script')}
           onOpenSettings={() => setPanel('settings')}
           onToggleDebug={() => setDebugOverlay((v) => !v)}
           onStop={() => void handleStop()}
@@ -311,6 +313,14 @@ export default function App(): JSX.Element {
         />
       )}
       {panel === 'tools' && <ToolsPanel serial={activeSession?.serial ?? null} onClose={() => setPanel(null)} />}
+      {panel === 'script' && (
+        <ScriptPanel
+          sessionId={activeSession?.sessionId ?? null}
+          sessionLabel={activeSession ? activeSession.deviceName || activeSession.serial : null}
+          onClose={() => setPanel(null)}
+          onToast={showToast}
+        />
+      )}
       {connectOpen && <ConnectDialog onClose={() => setConnectOpen(false)} />}
       {clipboardOpen && activeSession && <ClipboardDialog send={send} onClose={() => setClipboardOpen(false)} />}
 

@@ -14,6 +14,7 @@ import {
   IconClipboard,
   IconKeyboard,
   IconTerminal,
+  IconScript,
   IconSettings,
   IconLayers,
   IconInfo
@@ -38,6 +39,7 @@ interface Props {
   onOpenKeymap: () => void
   onToggleKeymapEdit: () => void
   onOpenTools: () => void
+  onOpenScript: () => void
   onOpenSettings: () => void
   onToggleDebug: () => void
   onStop: () => void
@@ -140,6 +142,9 @@ export function Toolbar(p: Props): JSX.Element {
       </button>
       <button className="icon-btn" title="终端 / 文件" onClick={p.onOpenTools}>
         <IconTerminal width={19} height={19} />
+      </button>
+      <button className="icon-btn" title="脚本自动化" onClick={p.onOpenScript}>
+        <IconScript width={19} height={19} />
       </button>
       <button
         className={`icon-btn ${p.debugActive ? 'start' : ''}`}

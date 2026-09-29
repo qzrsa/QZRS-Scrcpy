@@ -961,6 +961,121 @@ textarea {
   color: var(--red);
 }
 
+/* ===== Script panel（脚本自动化）===== */
+.script-layout {
+  display: flex;
+  gap: 14px;
+  min-height: 0;
+}
+
+.script-list {
+  width: 190px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.script-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 2px 4px 6px;
+}
+
+.script-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.script-item:hover {
+  background: var(--bg-hover);
+}
+
+.script-item.active {
+  background: var(--bg-hover);
+  color: var(--accent);
+}
+
+.script-item-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.script-run-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+}
+
+.script-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.script-editor {
+  width: 100%;
+  min-height: 260px;
+  resize: vertical;
+  background: #0a0c10;
+  color: #c9d1d9;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow: auto;
+  outline: none;
+}
+
+.script-editor:focus {
+  border-color: var(--accent);
+}
+
+.script-log {
+  background: #0a0c10;
+  color: #c9d1d9;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  min-height: 90px;
+  max-height: 180px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.script-log .sys {
+  color: var(--green);
+}
+
+.script-log .log {
+  color: #c9d1d9;
+}
+
+.script-log .err {
+  color: var(--red);
+}
+
 /* ===== screenshot preview ===== */
 .screenshot-preview {
   max-width: 100%;

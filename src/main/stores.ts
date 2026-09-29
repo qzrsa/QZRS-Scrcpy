@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, unlinkSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { app } from 'electron'
-import type { AppSettings, DeviceHistoryEntry, DeviceInfo, KeymapConfig } from '@shared/types'
+import type { AppSettings, DeviceHistoryEntry, DeviceInfo, KeymapConfig, ScriptInfo } from '@shared/types'
 
 /** 历史设备最多保留条数，防止 devices.json 无限增长 */
 const MAX_DEVICE_HISTORY = 50
@@ -101,11 +101,29 @@ function keymapsDir(): string {
   return candidates[1]
 }
 
+/** 脚本目录（安装目录/scripts），回退策略与 keymaps 相同 */
+function scriptsDir(): string {
+  const candidates = [join(installRoot(), 'scripts'), join(dataDir(), 'scripts')]
+  for (const dir of candidates) {
+    try {
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+      const probe = join(dir, '.write-test')
+      writeFileSync(probe, '1', 'utf8')
+      unlinkSync(probe)
+      return dir
+    } catch {
+      /* 试下一个候选目录 */
+    }
+  }
+  return candidates[1]
+}
+
 export class Store {
   private settingsPath: string
   private devicesPath: string
   private keymapsDirPath: string
   private legacyKeymapsPath: string
+  private scriptsDirPath: string
 
   constructor() {
     const dir = dataDir()
@@ -113,6 +131,7 @@ export class Store {
     this.devicesPath = join(dir, 'devices.json')
     this.legacyKeymapsPath = join(dir, 'keymaps.json')
     this.keymapsDirPath = keymapsDir()
+    this.scriptsDirPath = scriptsDir()
     // ensure settings exists with defaults
     if (!existsSync(this.settingsPath)) writeJson(this.settingsPath, DEFAULT_SETTINGS)
     this.migrateLegacyKeymaps()
@@ -280,6 +299,61 @@ export class Store {
   /** 方案文件夹实际路径（可能因权限回退到 userData） */
   getKeymapsDir(): string {
     return this.keymapsDirPath
+  }
+
+  /** ---- 用户脚本（scripts/ 目录，每脚本一个 json）---- */
+
+  private listScriptFiles(): string[] {
+    try {
+      return readdirSync(this.scriptsDirPath).filter((f) => f.endsWith('.json'))
+    } catch {
+      return []
+    }
+  }
+
+  /** 读取全部脚本（按 updatedAt 降序，最近编辑在前） */
+  getScripts(): ScriptInfo[] {
+    const out: ScriptInfo[] = []
+    for (const f of this.listScriptFiles()) {
+      const s = readJson<ScriptInfo | null>(join(this.scriptsDirPath, f), null)
+      if (s && s.id && typeof s.code === 'string') {
+        out.push({
+          id: s.id,
+          name: String(s.name || '未命名脚本').slice(0, 40),
+          code: s.code,
+          updatedAt: Number(s.updatedAt) || 0
+        })
+      }
+    }
+    return out.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  /** 保存（新增或覆盖）；列表中已不存在的脚本，其文件一并删除 */
+  setScripts(list: ScriptInfo[]): ScriptInfo[] {
+    for (const s of list) {
+      if (!s?.id) continue
+      writeJson(join(this.scriptsDirPath, `${safeFileName(s.id)}.json`), {
+        id: s.id,
+        name: String(s.name || '未命名脚本').slice(0, 40),
+        code: String(s.code ?? '').slice(0, 100_000),
+        updatedAt: Number(s.updatedAt) || Date.now()
+      })
+    }
+    const keep = new Set(list.filter((s) => s?.id).map((s) => `${safeFileName(s.id)}.json`))
+    for (const f of this.listScriptFiles()) {
+      if (keep.has(f)) continue
+      try {
+        unlinkSync(join(this.scriptsDirPath, f))
+      } catch {
+        /* ignore */
+      }
+    }
+    return this.getScripts()
+  }
+
+  /** 脚本文件夹实际路径（设置面板/脚本面板展示用） */
+  getScriptsDir(): string {
+    return this.scriptsDirPath
   }
 
   getDir(): string {
