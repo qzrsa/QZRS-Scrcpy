@@ -326,7 +326,17 @@ export class AdbClient {
 
   /** Capture a PNG screenshot from the device. */
   async screencap(serial: string): Promise<Buffer> {
-    return this.execOut(serial, 'screencap -p', 30000)
+    const buf = await this.execOut(serial, 'screencap -p', 30000)
+    // 某些多屏设备的 screencap 会往 stdout 混入警告文本（如 "[Warning] Multiple
+    // displays were found..."），污染 PNG 流 → 找到 PNG 签名截掉前缀。
+    // 不清洗的话 nativeImage/浏览器解码失败或错解（模板截取/找图全挂）。
+    const PNG_SIG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    if (buf.length >= 8 && buf.compare(PNG_SIG, 0, 8, 0, 8) !== 0) {
+      const i = buf.indexOf(PNG_SIG)
+      if (i === -1) throw new Error('screencap 返回的不是 PNG 数据（可能被设备输出污染）')
+      return buf.subarray(i)
+    }
+    return buf
   }
 
   async forward(serial: string, localPort: number, socketName: string): Promise<AdbShellResult> {
