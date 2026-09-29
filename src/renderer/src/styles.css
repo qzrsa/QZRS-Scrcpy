@@ -654,6 +654,27 @@ textarea {
   width: 520px;
 }
 
+/* 可调宽抽屉：左边缘拖拽手柄（宽度由 inline style 控制，存 localStorage） */
+.drawer-resize-handle {
+  position: absolute;
+  top: 0;
+  left: -3px;
+  width: 7px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 5;
+  transition: background 0.15s;
+}
+
+.drawer-resize-handle:hover {
+  background: rgba(79, 140, 255, 0.25);
+}
+
+body.drawer-resizing {
+  cursor: ew-resize;
+  user-select: none;
+}
+
 .drawer-header {
   display: flex;
   align-items: center;
@@ -962,10 +983,18 @@ textarea {
 }
 
 /* ===== Script panel（脚本自动化）===== */
+/* 内容吃满抽屉高度：编辑器/日志内部各自滚动，抽屉本身不滚 */
+.drawer-body:has(.script-layout) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 .script-layout {
+  flex: 1;
+  min-height: 0;
   display: flex;
   gap: 14px;
-  min-height: 0;
 }
 
 .script-list {
@@ -974,6 +1003,13 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-height: 0;
+}
+
+.script-list-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .script-list-head {
@@ -1021,47 +1057,265 @@ textarea {
   flex-shrink: 0;
 }
 
+/* ---- waitImage 模板管理器 ---- */
+.tpl-list {
+  flex: 0 1 auto;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
+.tpl-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+.tpl-item:hover {
+  background: var(--bg-hover);
+}
+
+.tpl-thumb {
+  width: 30px;
+  height: 22px;
+  object-fit: contain;
+  background: #0a0c10;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.tpl-del {
+  opacity: 0;
+  flex-shrink: 0;
+}
+
+.tpl-item:hover .tpl-del {
+  opacity: 1;
+}
+
 .script-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
-.script-editor {
+/* ---- 工具栏：名称 + 保存/运行 + 图标按钮组 ---- */
+.script-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.script-name-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 130px;
+  display: flex;
+  align-items: center;
+}
+
+.script-name-wrap .text-input {
   width: 100%;
-  min-height: 260px;
-  resize: vertical;
+  padding-right: 22px;
+}
+
+.dirty-dot {
+  position: absolute;
+  right: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+
+/* ---- 代码编辑器：行号栏 + 高亮层 + 透明 textarea 叠加 ----
+   三层必须严格同字体/行高/padding（行高 19px 与 ScriptPanel 的 EDITOR_LINE_H 一致）*/
+.editor-wrap {
+  flex: 1;
+  min-height: 120px;
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: #0a0c10;
+  overflow: hidden;
+}
+
+.editor-wrap:focus-within {
+  border-color: var(--accent);
+}
+
+.editor-gutter {
+  flex-shrink: 0;
+  width: 40px;
+  overflow: hidden;
+  padding: 10px 0;
+  text-align: right;
+  color: #3d4450;
+  background: #0a0c10;
+  border-right: 1px solid #161a22;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 19px;
+  user-select: none;
+}
+
+.editor-ln {
+  height: 19px;
+  padding-right: 8px;
+}
+
+.editor-body {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+
+.editor-highlight,
+.editor-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  border: 0;
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 19px;
+  letter-spacing: normal;
+  white-space: pre;
+  tab-size: 2;
+}
+
+.editor-highlight {
+  overflow: hidden;
+  pointer-events: none;
+  color: #c9d1d9;
+  background: transparent;
+}
+
+.editor-highlight code {
+  display: block;
+  font-family: inherit;
+}
+
+.editor-input {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  outline: none;
+  overflow: auto;
+  color: transparent;
+  caret-color: #c9d1d9;
+  background: transparent;
+}
+
+.editor-input::placeholder {
+  color: #4a5160;
+}
+
+.editor-input::selection {
+  background: rgba(79, 140, 255, 0.28);
+}
+
+.tk-cmt {
+  color: #6a737d;
+  font-style: italic;
+}
+
+.tk-str {
+  color: #a5d6ff;
+}
+
+.tk-kw {
+  color: #ff7b72;
+}
+
+.tk-num {
+  color: #79c0ff;
+}
+
+.tk-api {
+  color: #d2a8ff;
+}
+
+/* ---- 日志区：高度可拖（log-resize 手柄 + inline height）---- */
+.log-resize {
+  flex-shrink: 0;
+  height: 6px;
+  border-radius: 3px;
+  cursor: ns-resize;
+  transition: background 0.15s;
+}
+
+.log-resize:hover {
+  background: var(--bg-hover);
+}
+
+.script-log {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
   background: #0a0c10;
   color: #c9d1d9;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 10px 12px;
+  overflow: hidden;
+}
+
+.script-log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  border-bottom: 1px solid #161a22;
+  flex-shrink: 0;
+}
+
+.script-log-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px;
   font-family: var(--mono);
   font-size: 12px;
   line-height: 1.55;
-  white-space: pre;
-  overflow: auto;
-  outline: none;
-}
-
-.script-editor:focus {
-  border-color: var(--accent);
-}
-
-.script-log {
-  background: #0a0c10;
-  color: #c9d1d9;
-  border-radius: var(--radius-sm);
-  padding: 10px 12px;
-  font-family: var(--mono);
-  font-size: 12px;
-  min-height: 90px;
-  max-height: 180px;
-  overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+.lts {
+  color: #3d4450;
+  margin-right: 8px;
+  font-size: 11px;
+}
+
+.script-log .jump {
+  cursor: pointer;
+}
+
+.script-log .jump:hover {
+  text-decoration: underline;
 }
 
 .script-log .sys {

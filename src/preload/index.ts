@@ -103,10 +103,10 @@ const api = {
     ipcRenderer.invoke('scripts:running'),
   openScriptsDir: (): Promise<{ ok: boolean; dir?: string }> => ipcRenderer.invoke('scripts:openDir'),
   /** waitImage 模板：保存（渲染层从截图框选裁出 PNG base64）/ 列表 / 删除 */
-  saveTemplate: (name: string, base64Png: string): Promise<{ ok: boolean; path?: string; names?: string[]; message?: string }> =>
+  saveTemplate: (name: string, base64Png: string): Promise<{ ok: boolean; path?: string; templates?: { name: string; png: string }[]; message?: string }> =>
     ipcRenderer.invoke('scripts:saveTemplate', name, base64Png),
-  listTemplates: (): Promise<string[]> => ipcRenderer.invoke('scripts:listTemplates'),
-  deleteTemplate: (name: string): Promise<{ ok: boolean; names?: string[] }> => ipcRenderer.invoke('scripts:deleteTemplate', name),
+  listTemplates: (): Promise<{ name: string; png: string }[]> => ipcRenderer.invoke('scripts:listTemplates'),
+  deleteTemplate: (name: string): Promise<{ ok: boolean; templates?: { name: string; png: string }[] }> => ipcRenderer.invoke('scripts:deleteTemplate', name),
   onScriptEvent: (cb: (e: ScriptRunEvent) => void): (() => void) => {
     const l = (_e: unknown, d: ScriptRunEvent): void => cb(d)
     ipcRenderer.on('script:event', l)

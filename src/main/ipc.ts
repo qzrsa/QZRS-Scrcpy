@@ -782,15 +782,15 @@ export function registerIpc(store: Store): AppManager {
       const buf = Buffer.from(String(base64Png), 'base64')
       if (buf.length === 0) return { ok: false, message: '模板内容为空' }
       const path = store.saveTemplate(trimmed, buf)
-      return { ok: true, path, names: store.getTemplateNames() }
+      return { ok: true, path, templates: store.getTemplates() }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }
     }
   })
-  ipcMain.handle('scripts:listTemplates', () => store.getTemplateNames())
+  ipcMain.handle('scripts:listTemplates', () => store.getTemplates())
   ipcMain.handle('scripts:deleteTemplate', (_e, name: string) => {
     store.deleteTemplate(String(name))
-    return { ok: true, names: store.getTemplateNames() }
+    return { ok: true, templates: store.getTemplates() }
   })
 
   // ---- fullscreen ----

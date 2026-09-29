@@ -383,6 +383,14 @@ export class Store {
     }
   }
 
+  /** 全部模板（名字 + base64 PNG，脚本面板的模板管理器用来画缩略图） */
+  getTemplates(): { name: string; png: string }[] {
+    return this.getTemplateNames().map((name) => {
+      const png = this.readTemplate(name)
+      return { name, png: png ? png.toString('base64') : '' }
+    })
+  }
+
   /** 读模板 PNG 字节；不存在返回 null */
   readTemplate(name: string): Buffer | null {
     try {
