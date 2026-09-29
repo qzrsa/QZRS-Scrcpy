@@ -1,5 +1,5 @@
 import vm from 'node:vm'
-import type { ControlCommand, ScriptInfo, ScriptRunEvent } from '@shared/types'
+import type { ControlCommand, ScriptInfo, ScriptRunEvent, WaitImageResult } from '@shared/types'
 
 /**
  * 脚本执行引擎：把用户 JS 放进 node:vm 沙箱，以 async IIFE 运行。
@@ -38,6 +38,16 @@ export interface ScriptEngineHooks {
   getVideoSize(sessionId: string): { width: number; height: number } | null
   isSessionAlive(sessionId: string): boolean
   onEvent(evt: ScriptRunEvent): void
+  /**
+   * waitImage 用：对指定会话的设备截屏并找命名模板。
+   * 返回坐标 = 匹配中心在**设备截屏坐标系**里的位置（引擎负责换算到视频坐标）。
+   * null = 模板不存在；found=false = 本轮没找到。
+   */
+  findTemplate(
+    sessionId: string,
+    name: string,
+    threshold: number
+  ): Promise<{ found: boolean; x: number; y: number; score: number; screenW: number; screenH: number } | null>
 }
 
 /** 常用 Android keycode 名称表（脚本里 key('BACK') 之类用） */
@@ -68,6 +78,9 @@ const KEYCODE_NAMES: Record<string, number> = {
   PAGE_UP: 92,
   PAGE_DOWN: 93
 }
+// 字母 A-Z（KEYCODE_A=29 起连续）与数字 0-9（KEYCODE_0=7 起连续），支持 key('A') / key('5')
+for (let i = 0; i < 26; i++) KEYCODE_NAMES[String.fromCharCode(65 + i)] = 29 + i
+for (let i = 0; i <= 9; i++) KEYCODE_NAMES[String(i)] = 7 + i
 
 /** 解析 key() 参数：数字直接用；'BACK' 这类名称查表；未知名报错 */
 export function resolveKeycode(name: string | number): number {
@@ -110,6 +123,25 @@ const SWIPE_STEP_MS = 16
 /** Omit 在联合类型上会塌缩成公共键，这里分发处理（每个成员各自 omit） */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 type ScriptRunEventPartial = DistributiveOmit<ScriptRunEvent, 'runId' | 'scriptId' | 'name'>
+
+/**
+ * vm 沙箱里抛的异常属于沙箱自己的 realm，宿主侧 `instanceof Error` 恒为 false
+ * （沙箱有独立的 Error 构造器）——只能按特征取 stack，不能依赖 instanceof。
+ * 宿主 realm 抛的错（ScriptApiError / ScriptStoppedError）不受影响，仍可用 instanceof。
+ */
+function crossRealmStack(err: unknown): string {
+  const s = (err as { stack?: unknown } | null | undefined)?.stack
+  return typeof s === 'string' ? s : ''
+}
+
+function crossRealmMessage(err: unknown): string {
+  const e = err as { name?: unknown; message?: unknown } | null | undefined
+  if (e && typeof e === 'object' && typeof e.message === 'string' && e.message !== '') {
+    const name = typeof e.name === 'string' && e.name !== '' ? e.name : 'Error'
+    return `${name}: ${e.message}`
+  }
+  return String(err)
+}
 
 export class ScriptEngine {
   private runs = new Map<string, RunState>()
@@ -167,6 +199,7 @@ export class ScriptEngine {
       .then((outcome) => {
         if (outcome === 'stopped') this.emit(st, { state: 'stopped' })
         else if (typeof outcome === 'string') this.emit(st, { state: 'error', message: outcome })
+        else if (outcome && typeof outcome === 'object') this.emit(st, { state: 'error', message: outcome.message, line: outcome.line })
         else this.emit(st, { state: 'done', elapsedMs: Date.now() - started })
       })
       .finally(() => {
@@ -200,11 +233,25 @@ export class ScriptEngine {
   }
 
   /**
+   * 从异常栈解析用户脚本行号。
+   * 栈里用户帧形如 `at xxx.js:2:1`；wrapped IIFE 在用户代码前加了 1 行
+   * （`(async () => {`），所以用户看到的行号 = 栈行号 - 1。
+   * 取**第一个**匹配（栈从内到外，第一个 .js 帧就是最内层的用户调用点）。
+   */
+  private parseErrorLine(stack: string): number | undefined {
+    const m = /\.js:(\d+):\d+/.exec(stack)
+    if (!m) return undefined
+    const line = parseInt(m[1], 10) - 1
+    return line >= 1 ? line : 1
+  }
+
+  /**
    * 执行主体。返回值语义：
-   * undefined → 正常跑完；'stopped' → 被停止；string → 错误消息（用户代码异常 / API 错误）。
+   * undefined → 正常跑完；'stopped' → 被停止；string → 错误消息；
+   * { message, line } → 带行号的错误。
    * 注意别用 'ok' 之类的字符串表示成功——它会被上层当成错误消息。
    */
-  private async execute(st: RunState, code: string): Promise<'stopped' | undefined | string> {
+  private async execute(st: RunState, code: string): Promise<'stopped' | undefined | string | { message: string; line?: number }> {
     const api = this.buildApi(st)
     const context = vm.createContext(api, { name: `qzrs-script-${st.runId}` })
     try {
@@ -214,10 +261,10 @@ export class ScriptEngine {
       return st.stopped ? 'stopped' : undefined
     } catch (err) {
       if (st.stopped) return 'stopped'
-      if (err instanceof ScriptStoppedError) return 'stopped'
-      if (err instanceof ScriptApiError) return err.message
-      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
-      return `脚本异常 → ${msg}`
+      const stack = crossRealmStack(err)
+      const line = this.parseErrorLine(stack)
+      if (err instanceof ScriptApiError) return { message: err.message, line }
+      return { message: `脚本异常 → ${crossRealmMessage(err)}`, line }
     }
   }
 
@@ -236,11 +283,12 @@ export class ScriptEngine {
      * rejection 标记为已处理（转成日志行），返回原 promise——await 它的
      * 用户依然能拿到原始异常。
      */
-    const guard = (p: Promise<void>): Promise<void> => {
+    const guard = <T,>(p: Promise<T>): Promise<T> => {
       p.catch((err) => {
         if (err instanceof ScriptStoppedError || st.stopped) return
-        const msg = err instanceof ScriptApiError ? err.message : err instanceof Error ? `${err.name}: ${err.message}` : String(err)
-        this.emit(st, { state: 'log', line: `⚠ ${msg}` })
+        const line = this.parseErrorLine(crossRealmStack(err))
+        const msg = err instanceof ScriptApiError ? err.message : crossRealmMessage(err)
+        this.emit(st, { state: 'log', line: `⚠${line ? ` 第${line}行 ` : ' '}${msg}` })
       })
       return p
     }
@@ -322,13 +370,14 @@ export class ScriptEngine {
       touch(1, bx, by, 0) // UP
     }
 
-    const keyImpl = async (name: unknown, duration = 30): Promise<void> => {
+    const keyImpl = async (name: unknown, duration = 30, metastate = 0): Promise<void> => {
       checkStop()
       const keycode = resolveKeycode(name as string | number)
       const d = Math.max(0, Number(duration) || 0)
-      this.hooks.sendControl(st.sessionId, { type: 'keycode', action: 0, keycode, repeat: 0, metastate: 0 })
+      const meta = Math.max(0, Math.min(0xffff, Math.trunc(Number(metastate) || 0)))
+      this.hooks.sendControl(st.sessionId, { type: 'keycode', action: 0, keycode, repeat: 0, metastate: meta })
       if (d > 0) await sleep(d)
-      this.hooks.sendControl(st.sessionId, { type: 'keycode', action: 1, keycode, repeat: 0, metastate: 0 })
+      this.hooks.sendControl(st.sessionId, { type: 'keycode', action: 1, keycode, repeat: 0, metastate: meta })
       checkStop()
     }
 
@@ -337,6 +386,45 @@ export class ScriptEngine {
       const n = Math.min(600_000, Math.max(0, Number(ms) || 0))
       await sleep(n)
       checkStop()
+    }
+
+    /**
+     * waitImage：轮询截屏找模板，直到出现或超时。
+     * 找到 → { found:true, x, y }（视频像素坐标，可直接喂给 tap）；
+     * 超时 → { found:false, x:-1, y:-1 }（不抛错，脚本自己决定怎么办）；
+     * 模板不存在 → 直接报错（提示先去脚本面板截取模板）。
+     */
+    const waitImageImpl = async (name: unknown, opts?: unknown): Promise<WaitImageResult> => {
+      checkStop()
+      const tplName = String(name ?? '').trim()
+      if (!tplName) throw new ScriptApiError('waitImage() 需要模板名，如 waitImage("start_btn")')
+      const o = (typeof opts === 'object' && opts !== null ? opts : {}) as { timeout?: unknown; interval?: unknown; threshold?: unknown }
+      const timeout = Math.min(120_000, Math.max(1000, Number(o.timeout) || 10_000))
+      const interval = Math.min(5000, Math.max(200, Number(o.interval) || 800))
+      const threshold = Math.min(1, Math.max(0.5, Number(o.threshold) || 0.9))
+      const deadline = Date.now() + timeout
+      let waited = 0
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        checkStop()
+        const r = await this.hooks.findTemplate(st.sessionId, tplName, threshold)
+        if (r === null) throw new ScriptApiError(`模板 "${tplName}" 不存在——请先在脚本面板「截取模板」里框选保存`)
+        if (r.found && r.screenW > 0 && r.screenH > 0) {
+          const { width, height } = size()
+          // 截屏是设备原始分辨率，视频流被 maxSize 缩放过 → 按比例换算成视频坐标
+          const sx = width / r.screenW
+          const sy = height / r.screenH
+          return { found: true, x: Math.round(r.x * sx), y: Math.round(r.y * sy), score: r.score }
+        }
+        if (Date.now() >= deadline) {
+          this.emit(st, { state: 'log', line: `waitImage("${tplName}") 超时（${Math.round(waited / 100) / 10}s 内未出现）` })
+          return { found: false, x: -1, y: -1 }
+        }
+        const nap = Math.min(interval, Math.max(1, deadline - Date.now()))
+        waited += nap
+        await sleep(nap)
+        checkStop()
+      }
     }
 
     const joinLogArgs = (args: unknown[]): string =>
@@ -349,17 +437,27 @@ export class ScriptEngine {
       /** 滑动：(x1,y1) → (x2,y2)，duration 总时长 ms，内部按 ~16ms 步长插值 MOVE。 */
       swipe: (x1: unknown, y1: unknown, x2: unknown, y2: unknown, duration?: number): Promise<void> =>
         guard(swipeImpl(x1, y1, x2, y2, duration)),
-      /** 输入文本（scrcpy INJECT_TEXT，最长 300 字节，中文 OK）。 */
+      /** 输入文本（scrcpy INJECT_TEXT，最长 300 字节，中文 OK）。超长直接报错，不静默截断。 */
       text: (s: unknown): void => {
         checkStop()
         const str = String(s ?? '')
         if (str.length === 0) throw new ScriptApiError('text() 需要非空文本')
+        const bytes = Buffer.byteLength(str, 'utf8')
+        if (bytes > 300) {
+          throw new ScriptApiError(`text() 超长：当前 ${bytes} 字节 > 上限 300 字节（中文每字 3 字节），请拆成多次 text() 或用 setClipboard 粘贴`)
+        }
         this.hooks.sendControl(st.sessionId, { type: 'text', text: str })
       },
-      /** 按键：key('BACK') / key(4) / key('BACK', 500)=长按 500ms。 */
-      key: (name: unknown, duration?: number): Promise<void> => guard(keyImpl(name, duration)),
+      /** 按键：key('BACK') / key(4) / key('BACK', 500)=长按 500ms / key('A', 0, metastate) 组合键。 */
+      key: (name: unknown, duration?: number, metastate?: number): Promise<void> => guard(keyImpl(name, duration, metastate)),
       /** 等待 ms（可被 stop 提前唤醒）。 */
       wait: (ms: unknown): Promise<void> => guard(waitImpl(ms)),
+      /**
+       * 截屏找图：等到模板出现在屏幕上为止（或超时）。
+       * 用法：const p = await waitImage('start_btn'); if (p.found) await tap(p.x, p.y)
+       * 可选：waitImage('btn', { timeout: 15000, threshold: 0.85 })
+       */
+      waitImage: (name: unknown, opts?: unknown): Promise<WaitImageResult> => guard(waitImageImpl(name, opts)),
       /** 输出一行日志到脚本面板。 */
       log: (...args: unknown[]): void => {
         this.emit(st, { state: 'log', line: joinLogArgs(args) })

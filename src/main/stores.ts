@@ -356,6 +356,56 @@ export class Store {
     return this.scriptsDirPath
   }
 
+  /** ---- waitImage 模板（scripts/templates/*.png）---- */
+
+  private templatesDir(): string {
+    return join(this.scriptsDirPath, 'templates')
+  }
+
+  /** 保存 waitImage 模板（PNG 字节）。返回实际路径。 */
+  saveTemplate(name: string, png: Buffer): string {
+    const safe = name.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || 'template'
+    const dir = this.templatesDir()
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+    const path = join(dir, `${safe}.png`)
+    writeFileSync(path, png)
+    return path
+  }
+
+  /** 全部模板名（不含扩展名） */
+  getTemplateNames(): string[] {
+    try {
+      return readdirSync(this.templatesDir())
+        .filter((f) => f.endsWith('.png'))
+        .map((f) => f.slice(0, -4))
+    } catch {
+      return []
+    }
+  }
+
+  /** 读模板 PNG 字节；不存在返回 null */
+  readTemplate(name: string): Buffer | null {
+    try {
+      const safe = name.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40)
+      const p = join(this.templatesDir(), `${safe}.png`)
+      if (!existsSync(p)) return null
+      return readFileSync(p)
+    } catch {
+      return null
+    }
+  }
+
+  /** 删除模板 */
+  deleteTemplate(name: string): void {
+    try {
+      const safe = name.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40)
+      const p = join(this.templatesDir(), `${safe}.png`)
+      if (existsSync(p)) unlinkSync(p)
+    } catch {
+      /* ignore */
+    }
+  }
+
   getDir(): string {
     return dirname(this.settingsPath)
   }

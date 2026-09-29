@@ -33,6 +33,10 @@ export default function App(): JSX.Element {
   const [screenshot, setScreenshot] = useState<string | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
   const [statsOpen, setStatsOpen] = useState(false)
+  // 脚本录制：录制中把 MirrorView 的手势转成代码行累积，停止后回传 ScriptPanel
+  const [scriptRecording, setScriptRecording] = useState(false)
+  const [recordLines, setRecordLines] = useState<string[]>([])
+  const [recordedCode, setRecordedCode] = useState<string | null>(null)
   const [netStats, setNetStats] = useState<SessionStats | null>(null)
   const [renderStats, setRenderStats] = useState<{ renderFps: number; hardware: boolean } | null>(null)
 
@@ -223,6 +227,33 @@ export default function App(): JSX.Element {
     showToast(next ? '群控已开启（输入将广播到所有会话）' : '群控已关闭', 'success')
   }
 
+  // ---- 脚本录制 ----
+  const startScriptRecord = useCallback((): void => {
+    setRecordLines([])
+    setRecordedCode(null)
+    setScriptRecording(true)
+    setPanel(null) // 面板遮罩会挡投屏操作，录制时收起
+    showToast('录制中：在投屏窗口里操作，点击/滑动会转成脚本', 'info')
+  }, [showToast])
+
+  const handleRecordGesture = useCallback((line: string): void => {
+    setRecordLines((l) => [...l, line])
+  }, [])
+
+  const stopScriptRecord = useCallback((): void => {
+    setScriptRecording(false)
+    setRecordLines((lines) => {
+      if (lines.length === 0) {
+        showToast('没有录到任何操作', 'error')
+        return lines
+      }
+      setRecordedCode(lines.join('\n'))
+      setPanel('script')
+      showToast(`已录制 ${lines.length} 个动作，回填到脚本编辑器`, 'success')
+      return lines
+    })
+  }, [showToast])
+
   return (
     <div className={`app ${fullscreen ? 'fullscreen' : ''}`}>
       {/* Custom frameless title bar with macOS-style traffic lights */}
@@ -269,7 +300,7 @@ export default function App(): JSX.Element {
 
         <div className="stage">
           {activeSession ? (
-            <MirrorView
+          <MirrorView
             session={activeSession}
             send={send}
             onError={(m) => showToast(m, 'error')}
@@ -279,6 +310,8 @@ export default function App(): JSX.Element {
             editing={keymapEditing}
             debug={debugOverlay}
             fileLog={settings.debugLogToFile}
+            recording={scriptRecording}
+            onRecordGesture={handleRecordGesture}
             onEditClose={() => setKeymapEditing(false)}
             onKeymapChange={handleKeymapChange}
           />
@@ -294,6 +327,16 @@ export default function App(): JSX.Element {
 
           {activeSession && statsOpen && (
             <StatsOverlay session={activeSession} transport={activeTransport} net={netStats} render={renderStats} />
+          )}
+
+          {scriptRecording && (
+            <div className="record-bar">
+              <span className="record-dot" />
+              <span>录制脚本中 · 已录 {recordLines.length} 个动作（键盘操作不录制）</span>
+              <button className="btn btn-danger btn-sm" onClick={stopScriptRecord}>
+                停止并生成
+              </button>
+            </div>
           )}
         </div>
       </main>
@@ -317,8 +360,12 @@ export default function App(): JSX.Element {
         <ScriptPanel
           sessionId={activeSession?.sessionId ?? null}
           sessionLabel={activeSession ? activeSession.deviceName || activeSession.serial : null}
+          serial={activeSession?.serial ?? null}
           onClose={() => setPanel(null)}
           onToast={showToast}
+          onStartRecord={startScriptRecord}
+          recordedCode={recordedCode}
+          onRecordedConsumed={() => setRecordedCode(null)}
         />
       )}
       {connectOpen && <ConnectDialog onClose={() => setConnectOpen(false)} />}

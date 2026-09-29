@@ -9,6 +9,7 @@ import { ScrcpySession } from './session'
 import { Store, debugLogDirCandidates } from './stores'
 import { DebugFileLogger } from './debuglog'
 import { ScriptEngine } from './scriptengine'
+import { bgraToRgba, matchTemplate, toGray } from './templatematch'
 import { themeBackground } from './theme'
 import { findAdb, findServer, findScrcpy } from './util'
 import type {
@@ -304,6 +305,33 @@ export function registerIpc(store: Store): AppManager {
 
   // ---- script engine ----
   // 用户 JS 脚本在主进程沙箱里跑，设备操作走与手动控制同一条 sendControl 链路。
+  //
+  // waitImage 的 findTemplate：截屏（设备原始分辨率）+ nativeImage 解 PNG（不引新依赖）
+  // → 灰度 NCC 匹配 → 返回截屏坐标系下的匹配中心。坐标换算（截屏→视频像素）由引擎做。
+  const findTemplate = async (
+    sessionId: string,
+    tplName: string,
+    threshold: number
+  ): Promise<{ found: boolean; x: number; y: number; score: number; screenW: number; screenH: number } | null> => {
+    const { nativeImage } = await import('electron')
+    const tplPng = store.readTemplate(tplName)
+    if (!tplPng) return null
+    const tplImg = nativeImage.createFromBuffer(tplPng)
+    if (tplImg.isEmpty()) return null
+    const tplSize = tplImg.getSize()
+    const h = sessions.get(sessionId)
+    if (!h) return { found: false, x: 0, y: 0, score: 0, screenW: 0, screenH: 0 }
+    const shot = await ensureAdb().screencap(h.serial)
+    const shotImg = nativeImage.createFromBuffer(shot)
+    if (shotImg.isEmpty()) return { found: false, x: 0, y: 0, score: 0, screenW: 0, screenH: 0 }
+    const shotSize = shotImg.getSize()
+    const screen = toGray(bgraToRgba(new Uint8Array(shotImg.toBitmap())), shotSize.width, shotSize.height)
+    const tpl = toGray(bgraToRgba(new Uint8Array(tplImg.toBitmap())), tplSize.width, tplSize.height)
+    const m = matchTemplate(screen, tpl, threshold)
+    if (!m) return { found: false, x: 0, y: 0, score: 0, screenW: shotSize.width, screenH: shotSize.height }
+    return { found: true, x: m.x, y: m.y, score: m.score, screenW: shotSize.width, screenH: shotSize.height }
+  }
+
   const scriptEngine = new ScriptEngine({
     sendControl: (sessionId, cmd) => {
       const h = sessions.get(sessionId)
@@ -311,7 +339,8 @@ export function registerIpc(store: Store): AppManager {
     },
     getVideoSize: (sessionId) => videoSizes.get(sessionId) ?? null,
     isSessionAlive: (sessionId) => sessions.has(sessionId),
-    onEvent: (evt) => send('script:event', evt)
+    onEvent: (evt) => send('script:event', evt),
+    findTemplate
   })
 
   // ---- session management ----
@@ -743,6 +772,25 @@ export function registerIpc(store: Store): AppManager {
   ipcMain.handle('scripts:openDir', () => {
     void shell.openPath(store.getScriptsDir())
     return { ok: true, dir: store.getScriptsDir() }
+  })
+
+  // waitImage 模板：渲染层从截图上框选裁出 PNG（base64），主进程落盘到 scripts/templates/
+  ipcMain.handle('scripts:saveTemplate', (_e, name: string, base64Png: string) => {
+    try {
+      const trimmed = String(name ?? '').trim()
+      if (!trimmed) return { ok: false, message: '模板名不能为空' }
+      const buf = Buffer.from(String(base64Png), 'base64')
+      if (buf.length === 0) return { ok: false, message: '模板内容为空' }
+      const path = store.saveTemplate(trimmed, buf)
+      return { ok: true, path, names: store.getTemplateNames() }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+  ipcMain.handle('scripts:listTemplates', () => store.getTemplateNames())
+  ipcMain.handle('scripts:deleteTemplate', (_e, name: string) => {
+    store.deleteTemplate(String(name))
+    return { ok: true, names: store.getTemplateNames() }
   })
 
   // ---- fullscreen ----

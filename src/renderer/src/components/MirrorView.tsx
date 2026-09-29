@@ -23,6 +23,9 @@ interface Props {
   /** called when the editor requests to close (save or cancel) */
   onEditClose?: () => void
   onKeymapChange?: (k: KeymapConfig) => void
+  /** 脚本录制模式：true 时把用户的指针手势转成脚本代码行回传 */
+  recording?: boolean
+  onRecordGesture?: (codeLine: string) => void
 }
 
 /**
@@ -43,12 +46,16 @@ export function MirrorView({
   debug,
   fileLog,
   onEditClose,
-  onKeymapChange
+  onKeymapChange,
+  recording,
+  onRecordGesture
 }: Props): JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const playerRef = useRef<H264Player | null>(null)
   const mouseDownRef = useRef(false)
+  /** 录制用：主键按下时的位置与时间（onPointerUp 时算手势） */
+  const recordDownRef = useRef<{ x: number; y: number; time: number } | null>(null)
   const metaRef = useRef(0)
   /** per-binding runtime state for `hold` / `repeat` / `view` */
   const bindingStateRef = useRef<Map<string, BindingState>>(new Map())
@@ -547,6 +554,10 @@ export function MirrorView({
     const p = toVideo(e.clientX, e.clientY)
     mouseDownRef.current = true
     ;(e.currentTarget as HTMLCanvasElement).setPointerCapture(e.pointerId)
+    // 录制：记录主键按下的起点（右键/中键的 BACK/HOME 不录——脚本里用 key('BACK') 更清晰）
+    if (recording && e.button === 0) {
+      recordDownRef.current = { x: p.x, y: p.y, time: Date.now() }
+    }
     send({ type: 'touch', action: 0, pointerId: pointerId(e.pointerType), x: p.x, y: p.y, width: p.w, height: p.h, pressure: 1, buttons: BUTTON.PRIMARY })
   }
 
@@ -566,6 +577,21 @@ export function MirrorView({
     if (e.pointerType === 'mouse' && (e.button === 2 || e.button === 1)) return
     const p = toVideo(e.clientX, e.clientY)
     mouseDownRef.current = false
+    // 录制：按下手势分类（点击 / 长按 / 滑动）→ 转成一行脚本代码
+    const down = recordDownRef.current
+    recordDownRef.current = null
+    if (recording && down && onRecordGesture) {
+      const dx = p.x - down.x
+      const dy = p.y - down.y
+      const dist = Math.hypot(dx, dy)
+      const dt = Math.max(30, Date.now() - down.time)
+      const rx = (v: number): number => Math.round(v)
+      if (dist < 24) {
+        onRecordGesture(dt >= 500 ? `await tap(${rx(down.x)}, ${rx(down.y)}, ${dt})` : `await tap(${rx(down.x)}, ${rx(down.y)})`)
+      } else {
+        onRecordGesture(`await swipe(${rx(down.x)}, ${rx(down.y)}, ${rx(p.x)}, ${rx(p.y)}, ${dt})`)
+      }
+    }
     send({ type: 'touch', action: 1, pointerId: pointerId(e.pointerType), x: p.x, y: p.y, width: p.w, height: p.h, pressure: 0, buttons: 0 })
   }
 

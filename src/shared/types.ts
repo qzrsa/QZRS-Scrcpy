@@ -249,4 +249,13 @@ export type ScriptRunEvent =
   | { runId: string; scriptId: string; name: string; state: 'log'; line: string }
   | { runId: string; scriptId: string; name: string; state: 'done'; elapsedMs: number }
   | { runId: string; scriptId: string; name: string; state: 'stopped' }
-  | { runId: string; scriptId: string; name: string; state: 'error'; message: string }
+  | { runId: string; scriptId: string; name: string; state: 'error'; message: string; /** 出错的用户脚本行号（1 起，解析不出为 undefined） */ line?: number }
+
+/** waitImage(name, opts) 的返回值：坐标为视频像素坐标（与 tap 一致）；未找到 found=false */
+export interface WaitImageResult {
+  found: boolean
+  x: number
+  y: number
+  /** 匹配置信度 0..1（越高越像） */
+  score?: number
+}

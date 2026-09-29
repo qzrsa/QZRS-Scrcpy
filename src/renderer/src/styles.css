@@ -1076,6 +1076,61 @@ textarea {
   color: var(--red);
 }
 
+/* ===== 脚本录制悬浮条 ===== */
+.record-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  color: var(--text);
+}
+
+.record-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: record-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes record-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+/* ===== waitImage 模板截取 ===== */
+.tpl-stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  cursor: crosshair;
+  line-height: 0;
+  user-select: none;
+}
+
+.tpl-stage img {
+  max-width: 100%;
+  max-height: 55vh;
+  display: block;
+}
+
+.tpl-rect {
+  position: absolute;
+  border: 1.5px solid var(--accent);
+  background: rgba(79, 140, 255, 0.15);
+  pointer-events: none;
+}
+
 /* ===== screenshot preview ===== */
 .screenshot-preview {
   max-width: 100%;

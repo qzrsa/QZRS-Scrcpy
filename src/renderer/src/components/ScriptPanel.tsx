@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { ScriptInfo, ScriptRunEvent } from '@shared/types'
 import { Drawer } from './Drawer'
 import { IconPlus, IconScript, IconStop, IconTrash } from './icons'
@@ -7,8 +8,15 @@ interface Props {
   /** 当前活跃会话（投屏开着才有）；脚本通过它把指令发到设备 */
   sessionId: string | null
   sessionLabel: string | null
+  /** 设备 serial（截取 waitImage 模板要截屏） */
+  serial: string | null
   onClose: () => void
   onToast: (msg: string, type?: 'info' | 'error' | 'success') => void
+  /** 开始录制：由 App 关闭本面板并进入录制模式 */
+  onStartRecord: () => void
+  /** 录制生成的代码（App 在停止录制后回传）；消费后调 onRecordedConsumed */
+  recordedCode: string | null
+  onRecordedConsumed: () => void
 }
 
 interface LogLine {
@@ -22,6 +30,7 @@ const TEMPLATE = `// 设备 API（坐标 = 视频像素坐标，与调试浮层�
 //   text('hello')                   输入文本（支持中文）
 //   key('BACK') / key(4)            按键（BACK HOME ENTER VOLUME_UP ... 或数字 keycode）
 //   wait(ms)                        等待
+//   waitImage('模板名')              截屏找图，等到出现（先点「截取模板」）
 //   log('...') / console.log('...') 输出日志
 // 顶层可直接 await，例：
 
@@ -35,7 +44,7 @@ log('完成')
 
 const MAX_LOG_LINES = 500
 
-export function ScriptPanel({ sessionId, sessionLabel, onClose, onToast }: Props): JSX.Element {
+export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast, onStartRecord, recordedCode, onRecordedConsumed }: Props): JSX.Element {
   const [scripts, setScripts] = useState<ScriptInfo[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -65,6 +74,14 @@ export function ScriptPanel({ sessionId, sessionLabel, onClose, onToast }: Props
     })
   }, [])
 
+  // 录制生成的代码回填：追加到当前编辑器内容后
+  useEffect(() => {
+    if (!recordedCode) return
+    setCode((prev) => (prev.trim() ? `${prev.trimEnd()}\n\n// —— 以下是录制的操作 ——\n${recordedCode}` : recordedCode))
+    setDirty(true)
+    onRecordedConsumed()
+  }, [recordedCode, onRecordedConsumed])
+
   // 脚本运行事件 → 日志区 + 运行状态
   useEffect(() => {
     const off = window.api.onScriptEvent((e: ScriptRunEvent) => {
@@ -81,7 +98,7 @@ export function ScriptPanel({ sessionId, sessionLabel, onClose, onToast }: Props
         pushLine('sys', '■ 已停止')
         runs.delete(e.runId)
       } else if (e.state === 'error') {
-        pushLine('err', `✘ ${e.message}`)
+        pushLine('err', e.line ? `✘ 第 ${e.line} 行：${e.message}` : `✘ ${e.message}`)
         runs.delete(e.runId)
       }
       setRunningIds(new Set([...runs.values()].filter((r) => r.state === 'running').map((r) => r.scriptId)))
@@ -166,7 +183,71 @@ export function ScriptPanel({ sessionId, sessionLabel, onClose, onToast }: Props
 
   const runningThis = selectedId !== null && runningIds.has(selectedId)
 
+  // ---- waitImage 模板截取：截屏 → 拖框 → 裁剪保存 ----
+  const [tplOpen, setTplOpen] = useState(false)
+  const [tplShot, setTplShot] = useState<string | null>(null)
+  const [tplName, setTplName] = useState('')
+  const [tplRect, setTplRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const tplImgRef = useRef<HTMLImageElement | null>(null)
+  const tplDragRef = useRef(false)
+
+  const openTplCapture = async (): Promise<void> => {
+    if (!serial) {
+      onToast('请先连接设备再截取模板', 'error')
+      return
+    }
+    const r = await window.api.screenshot(serial)
+    if (!r.ok || !r.data) {
+      onToast(r.message || '截屏失败', 'error')
+      return
+    }
+    setTplShot(r.data)
+    setTplRect(null)
+    setTplName(`tpl_${Date.now().toString(36)}`)
+    setTplOpen(true)
+  }
+
+  const tplPos = (e: ReactMouseEvent<HTMLDivElement>): { x: number; y: number } => {
+    const rect = e.currentTarget.getBoundingClientRect()
+    return {
+      x: Math.max(0, Math.min(rect.width, e.clientX - rect.left)),
+      y: Math.max(0, Math.min(rect.height, e.clientY - rect.top))
+    }
+  }
+
+  const saveTpl = async (): Promise<void> => {
+    const img = tplImgRef.current
+    if (!img || !tplRect) {
+      onToast('请先在截图上拖出一个框', 'error')
+      return
+    }
+    const dispW = img.clientWidth
+    const dispH = img.clientHeight
+    const scale = img.naturalWidth / dispW
+    const sx = Math.round(Math.min(tplRect.x0, tplRect.x1) * scale)
+    const sy = Math.round(Math.min(tplRect.y0, tplRect.y1) * scale)
+    const cw = Math.max(8, Math.round(Math.abs(tplRect.x1 - tplRect.x0) * scale))
+    const ch = Math.max(8, Math.round(Math.abs(tplRect.y1 - tplRect.y0) * scale))
+    if (sx + cw > img.naturalWidth || sy + ch > img.naturalHeight) {
+      onToast('选区超出截图范围', 'error')
+      return
+    }
+    const canvas = document.createElement('canvas')
+    canvas.width = cw
+    canvas.height = ch
+    canvas.getContext('2d')!.drawImage(img, sx, sy, cw, ch, 0, 0, cw, ch)
+    const base64 = canvas.toDataURL('image/png').split(',')[1] ?? ''
+    const r = await window.api.saveTemplate(tplName.trim(), base64)
+    if (r.ok) {
+      onToast(`模板「${tplName.trim()}」已保存`, 'success')
+      setTplOpen(false)
+    } else {
+      onToast(r.message || '保存失败', 'error')
+    }
+  }
+
   return (
+    <>
     <Drawer title="脚本自动化" wide onClose={onClose}>
       {!sessionId ? (
         <div className="hint">请先连接一台设备（投屏开启）再运行脚本。脚本编辑不受影响。</div>
@@ -222,6 +303,12 @@ export function ScriptPanel({ sessionId, sessionLabel, onClose, onToast }: Props
                 运行
               </button>
             )}
+            <button className="btn btn-ghost" onClick={onStartRecord} title="关闭面板后在投屏窗口里操作，操作会转成脚本代码">
+              ● 录制
+            </button>
+            <button className="btn btn-ghost" onClick={() => void openTplCapture()} title="从当前屏幕截一块图作为 waitImage 模板">
+              截取模板
+            </button>
             <button className="btn btn-ghost" onClick={() => void remove()} disabled={!selectedId} title="删除脚本">
               <IconTrash width={15} height={15} />
             </button>
@@ -266,5 +353,69 @@ export function ScriptPanel({ sessionId, sessionLabel, onClose, onToast }: Props
         </div>
       </div>
     </Drawer>
+
+    {tplOpen && tplShot && (
+      <div className="modal-backdrop" onClick={() => setTplOpen(false)}>
+        <div className="modal" style={{ width: 'min(84vw, 680px)' }} onClick={(e) => e.stopPropagation()}>
+          <div className="modal-header">
+            <h2>截取 waitImage 模板</h2>
+            <button className="icon-btn" onClick={() => setTplOpen(false)} title="关闭">
+              ✕
+            </button>
+          </div>
+          <div className="modal-body">
+            <div
+              className="tpl-stage"
+              onMouseDown={(e) => {
+                const p = tplPos(e)
+                tplDragRef.current = true
+                setTplRect({ x0: p.x, y0: p.y, x1: p.x, y1: p.y })
+              }}
+              onMouseMove={(e) => {
+                if (!tplDragRef.current) return
+                const p = tplPos(e)
+                setTplRect((r) => (r ? { ...r, x1: p.x, y1: p.y } : r))
+              }}
+              onMouseUp={() => (tplDragRef.current = false)}
+              onMouseLeave={() => (tplDragRef.current = false)}
+            >
+              <img
+                ref={tplImgRef}
+                src={`data:image/png;base64,${tplShot}`}
+                alt="设备截图"
+                draggable={false}
+              />
+              {tplRect && (
+                <div
+                  className="tpl-rect"
+                  style={{
+                    left: Math.min(tplRect.x0, tplRect.x1),
+                    top: Math.min(tplRect.y0, tplRect.y1),
+                    width: Math.abs(tplRect.x1 - tplRect.x0),
+                    height: Math.abs(tplRect.y1 - tplRect.y0)
+                  }}
+                />
+              )}
+            </div>
+            <div className="row" style={{ marginTop: 10 }}>
+              <input
+                className="text-input"
+                value={tplName}
+                placeholder="模板名，如 start_btn"
+                onChange={(e) => setTplName(e.target.value)}
+              />
+              <button className="btn btn-primary" onClick={() => void saveTpl()} disabled={!tplRect || Math.abs(tplRect.x1 - tplRect.x0) < 8 || Math.abs(tplRect.y1 - tplRect.y0) < 8}>
+                保存模板
+              </button>
+              <button className="btn btn-ghost" onClick={() => setTplOpen(false)}>
+                取消
+              </button>
+            </div>
+            <div className="hint">在截图上拖一个框（框住要找的按钮/图标），保存后脚本里用 waitImage('模板名') 等它出现。名字会自动清理非法字符。</div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }
