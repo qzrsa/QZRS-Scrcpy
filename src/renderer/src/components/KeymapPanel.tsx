@@ -210,6 +210,15 @@ export function KeymapPanel({ onClose, onOpenVisualEditor, onToast }: Props): JS
                     name="active-keymap"
                     checked={activeId === cfg.id}
                     onChange={() => setActiveId(cfg.id)}
+                    // radio 选中后再点自己不会触发 onChange —— 在 onClick 拦截实现「再次点击 = 取消激活」，
+                    // 否则一旦激活就永远回不到「无激活」状态（radio 本性不可反选，也没有别的取消入口）
+                    onClick={(e) => {
+                      if (activeId === cfg.id) {
+                        e.preventDefault()
+                        setActiveId(null)
+                      }
+                    }}
+                    title="勾选激活此方案；再次点击已选中的可取消激活（需保存映射生效）"
                   />
                   激活
                 </label>

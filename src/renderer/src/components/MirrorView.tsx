@@ -165,6 +165,37 @@ export function MirrorView({
   }, [session?.sessionId])
 
   /**
+   * 激活方案被切换 / 取消激活时，把所有还按着的虚拟手指抬起（UP）并清掉定时器。
+   * 否则取消激活后 hold/repeat/view 与 WASD 摇杆会永久卡在「按住」状态——
+   * keyup 走的是按旧映射匹配，映射没了（或换了）就匹配不到任何 binding，手指永不抬起。
+   * 用 ref 持有最新释放函数，effect 只依赖方案 id（编辑保存不触发，切换/取消才触发）。
+   */
+  const releaseKeymapStateRef = useRef<() => void>(() => {})
+  releaseKeymapStateRef.current = () => {
+    const canvas = canvasRef.current
+    const dims = canvas && canvas.width ? { w: canvas.width, h: canvas.height } : { w: 1, h: 1 }
+    const m = bindingStateRef.current
+    for (const st of m.values()) {
+      if (st.tickTimer !== undefined) clearInterval(st.tickTimer)
+      if (st.autoTimer !== undefined) clearTimeout(st.autoTimer)
+      // 手指抬到它当前所在的位置（view/repeat 的 curX/curY 会随 tick 移动）
+      touch(1, st.curX, st.curY, dims.w, dims.h, st.pointerId, 0, 0)
+    }
+    m.clear()
+    const g = groupStateRef.current
+    for (const gs of g.values()) {
+      if (gs.tickTimer !== undefined) clearInterval(gs.tickTimer)
+      touch(1, gs.curX, gs.curY, dims.w, dims.h, gs.pointerId, 0, 0)
+    }
+    g.clear()
+  }
+  const activeKeymapId = keymap?.id ?? null
+  useEffect(() => {
+    // cleanup 在方案 id 变化 / 视图卸载时执行（含卸载：关投屏窗口时也把按住的手指放掉）
+    return () => releaseKeymapStateRef.current()
+  }, [activeKeymapId])
+
+  /**
    * Compute the stick center (normalized) from a group of bindings.
    * For a classic WASD pad, this is the geometric center of the 4 keys.
    */
