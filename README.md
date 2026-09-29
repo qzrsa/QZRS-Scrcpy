@@ -14,6 +14,7 @@
 | 屏幕 | 截屏、录屏（screenrecord）、旋转 |
 | 剪贴板 | 双向同步 / 手动发送粘贴 |
 | 按键映射 | 自定义键盘 → tap/swipe/keycode 映射，可视化录制 |
+| 脚本自动化 | 用 JS 编写 tap/swipe/text/key/wait 动作序列自动执行（[脚本编写指南](docs/script-guide.md)） |
 | 工具 | ADB Shell 终端、文件推送/拉取 |
 | 设置 | 分辨率/码率/帧率、编码器、主题、常亮/触摸显示等 |
 
