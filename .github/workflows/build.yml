@@ -103,6 +103,12 @@ jobs:
           GREEN="QZRS Scrcpy ${BUILD_TAG}"
           SETUP="QZRS-Scrcpy-Setup-${BUILD_TAG}.exe"
           PORTABLE="QZRS-Scrcpy-Portable-${BUILD_TAG}.exe"
+          # ⚠️ zip 名必须带连字符、不含空格：GitHub 上传 Release 资产时会把它自己
+          #    "normalize" —— 空格会被替换成点（实测 QZRS Scrcpy 20260930008.zip
+          #    变成了 QZRS.Scrcpy.20260930008.zip），而 action-gh-release 官方文档写明
+          #    "the final download name remains GitHub-controlled"，没有 # 之类的改名语法，
+          #    治不了。所以从源头就不带空格，同时与 SETUP / PORTABLE 风格统一。
+          GREEN_ZIP="QZRS-Scrcpy-Green-${BUILD_TAG}.zip"
           echo "版本号 ${APP_VER} / 编号 ${BUILD_TAG}"
 
           # ⚠️ --publish never 必须加：CI 环境下 electron-builder 会自动尝试发布到
@@ -150,6 +156,7 @@ jobs:
             echo "BUILD_TAG=${BUILD_TAG}"
             echo "APP_VER=${APP_VER}"
             echo "GREEN=${GREEN}"
+            echo "GREEN_ZIP=${GREEN_ZIP}"
             echo "SETUP=${SETUP}"
             echo "PORTABLE=${PORTABLE}"
             echo "RELEASE_DIR=${RELEASE_DIR}"
@@ -192,7 +199,7 @@ jobs:
           # 脚本路径要用绝对/仓库根相对路径（这里先记下仓库根）。
           $root = $PWD.Path
           Set-Location ../release
-          & "$root/.github/scripts/generate-green-zip.ps1" -DirName $env:GREEN
+          & "$root/.github/scripts/generate-green-zip.ps1" -DirName $env:GREEN -ZipName $env:GREEN_ZIP
 
       - name: 上传产物（Actions 页面可下载）
         uses: actions/upload-artifact@v4
@@ -203,20 +210,20 @@ jobs:
           path: |
             ${{ env.RELEASE_DIR }}\${{ env.SETUP }}
             ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
-            ${{ env.RELEASE_DIR }}\${{ env.GREEN }}.zip
+            ${{ env.RELEASE_DIR }}\${{ env.GREEN_ZIP }}
           if-no-files-found: error
           retention-days: 30
 
       # 只有打 v* tag 时才发布 Release
       - name: 发布到 GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: QZRS Scrcpy ${{ env.BUILD_TAG }}
           files: |
             ${{ env.RELEASE_DIR }}\${{ env.SETUP }}
             ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
-            ${{ env.RELEASE_DIR }}\${{ env.GREEN }}.zip
+            ${{ env.RELEASE_DIR }}\${{ env.GREEN_ZIP }}
           generate_release_notes: true
           draft: false
           prerelease: false
@@ -234,7 +241,8 @@ jobs:
           echo "SETUP=${SETUP}"
           echo "PORTABLE=${PORTABLE}"
           echo "GREEN=${GREEN}"
-          for f in "${SETUP}" "${PORTABLE}" "${GREEN}.zip"; do
+          echo "GREEN_ZIP=${GREEN_ZIP}"
+          for f in "${SETUP}" "${PORTABLE}" "${GREEN_ZIP}"; do
             if [ -f "$f" ]; then
               echo "OK   $f  $(( $(stat -c%s "$f") / 1048576 )) MB"
             else
@@ -249,7 +257,7 @@ jobs:
           cd ../release
           setup_mb=$(( $(stat -c%s "${SETUP}") / 1048576 ))
           port_mb=$(( $(stat -c%s "${PORTABLE}") / 1048576 ))
-          zip_mb=$(( $(stat -c%s "${GREEN}.zip") / 1048576 ))
+          zip_mb=$(( $(stat -c%s "${GREEN_ZIP}") / 1048576 ))
           {
             echo "## QZRS Scrcpy 构建完成"
             echo ""
@@ -259,7 +267,7 @@ jobs:
             echo "| --- | --- | --- | --- |"
             echo "| 安装版 | \`${SETUP}\` | ${setup_mb} MB | 标准向导安装，可自选目录、建快捷方式 |"
             echo "| 便携版 | \`${PORTABLE}\` | ${port_mb} MB | 单文件，双击即用，可放 U 盘 |"
-            echo "| 绿色版 | \`${GREEN}.zip\` | ${zip_mb} MB | 免安装目录，解压即用 |"
+            echo "| 绿色版 | \`${GREEN_ZIP}\` | ${zip_mb} MB | 免安装目录，解压即用 |"
             echo ""
             echo "下载：**Actions → 本次 run → Artifacts → QZRS-Scrcpy-${BUILD_TAG}**"
           } >> "$GITHUB_STEP_SUMMARY"

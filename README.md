@@ -69,7 +69,7 @@ npm run dist
 |------|--------|------|
 | **安装版** | `QZRS-Scrcpy-Setup-<编号>.exe` | 标准安装向导，可自选安装目录、自动建桌面/开始菜单快捷方式 |
 | **便携版** | `QZRS-Scrcpy-Portable-<编号>.exe` | 单文件，双击即用，可放 U 盘 |
-| **绿色版** | `QZRS Scrcpy <8位日期><3位序号>.zip` | 免安装目录，解压即用 |
+| **绿色版** | `QZRS-Scrcpy-Green-<编号>.zip` | 免安装目录，解压即用 |
 
 编号沿用本地约定 `QZRS Scrcpy <8位日期><3位序号>`：手动触发时可自己填序号与本地对齐，
 否则用 GitHub 的 run number 自动补零。
@@ -77,8 +77,14 @@ npm run dist
 **拿到产物**：进入 `Actions` → 点开对应那次 run → 页面底部 `Artifacts` 里下载
 `QZRS-Scrcpy-<编号>`，解压后即可使用（adb / scrcpy / scrcpy-server 均已随包附带，无需另装）。
 
-> 注：绿色版 zip 解压后 `QZRS Scrcpy.exe` 直接在当前目录（压缩包是扁平结构），
+打 `v*` 标签时，三个产物也会出现在仓库的 **Releases** 页面，可直接下载。
+
+> 注①：绿色版 zip 解压后 `QZRS Scrcpy.exe` 直接在当前目录（压缩包是扁平结构），
 > 建议先新建一个文件夹再解压。
+>
+> 注②：绿色版 zip 用连字符命名（`QZRS-Scrcpy-Green-...`）而不是空格，是因为 GitHub
+> 会把 Release 资产名里的空格自动替换成点（`QZRS Scrcpy X.zip` → `QZRS.Scrcpy.X.zip`），
+> 且该行为无法通过 action 覆盖。
 
 ## 连接设备
 

@@ -16,9 +16,16 @@
 #   terminators (observed: garbled Chinese + "string is missing the terminator").
 #
 # Usage: generate-green-zip.ps1 -DirName "QZRS Scrcpy 20260930003"
+#        generate-green-zip.ps1 -DirName "QZRS Scrcpy 20260930003" -ZipName "QZRS-Scrcpy-Green-20260930003.zip"
+#
+# -ZipName overrides the output zip filename. Default is "<DirName>.zip".
+#   We pass an explicit hyphenated name in CI because GitHub normalizes release
+#   asset filenames -- spaces become dots (QZRS Scrcpy X.zip -> QZRS.Scrcpy.X.zip)
+#   and action-gh-release cannot override the final download name.
 
 param(
-  [Parameter(Mandatory = $true)][string]$DirName
+  [Parameter(Mandatory = $true)][string]$DirName,
+  [string]$ZipName = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,7 +35,7 @@ if (-not (Test-Path -LiteralPath $DirName -PathType Container)) {
   throw "Green build directory not found: $DirName"
 }
 
-$zip = "$DirName.zip"
+$zip = if ([string]::IsNullOrEmpty($ZipName)) { "$DirName.zip" } else { $ZipName }
 if (Test-Path -LiteralPath $zip) { [IO.File]::Delete($zip) }
 
 # Archive the directory CONTENTS at the zip root (no wrapping folder),
