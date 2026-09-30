@@ -114,8 +114,21 @@ jobs:
           npx electron-builder --win nsis portable dir --x64 --publish never
 
           cd ../release
-          RELEASE_DIR="$(pwd)"
-          echo "release 目录：${RELEASE_DIR}"
+          # ⚠️ 必须转成原生 Windows 绝对路径（且不带 ..）给后面的 action 用：
+          #   1) upload-artifact@v4 拒绝含 '.' / '..' 的 pattern：
+          #      Invalid pattern '../release/xxx.exe'. Relative pathing '.' and '..' is not allowed.
+          #      实测 @actions/glob 的 fixupPattern 是**见到 .. 就断言失败**，
+          #      就算写成 "${workspace}\..\release\x.exe"（前面已绝对）也照样被拒。
+          #   2) 直接 $(pwd) 也不行：Git Bash 给的是 MSYS 风格 /d/a/QZRS-Scrcpy/release，
+          #      Node 实现的 action 解析不了，会报 No files were found。
+          #   所以用 cygpath -w -a 一步到位：原生 Windows 路径 + 消掉 ..
+          RELEASE_DIR="$(cygpath -w -a "$(pwd)")"
+          case "$RELEASE_DIR" in
+            *".."*) echo "::error::RELEASE_DIR 仍含 .. ，upload-artifact 会拒绝：$RELEASE_DIR"; exit 1 ;;
+            [A-Za-z]:\\*) ;;
+            *) echo "::error::RELEASE_DIR 不是原生 Windows 路径：$RELEASE_DIR"; exit 1 ;;
+          esac
+          echo "release 目录（Windows 绝对路径）：${RELEASE_DIR}"
           echo "::group::打包原始产物"
           ls -1
           echo "::endgroup::"
@@ -139,9 +152,6 @@ jobs:
             echo "GREEN=${GREEN}"
             echo "SETUP=${SETUP}"
             echo "PORTABLE=${PORTABLE}"
-            # ⚠️ release 目录在仓库外（../release）。upload-artifact@v4 明确拒绝含 '.' / '..'
-            #    的相对路径：Invalid pattern '../release/xxx.exe'. Relative pathing '.' and '..'
-            #    is not allowed. —— 所以这里存一份绝对路径给后面用。
             echo "RELEASE_DIR=${RELEASE_DIR}"
           } >> "$GITHUB_ENV"
 
@@ -188,11 +198,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: QZRS-Scrcpy-${{ env.BUILD_TAG }}
-          # ⚠️ 必须用绝对路径：upload-artifact@v4 不接受 '../release/...'
+          # RELEASE_DIR 由打包步骤用 cygpath -w -a 算出：原生 Windows 路径且不含 '..'
+          # （upload-artifact@v4 / @actions/glob 见到 '..' 直接断言失败，见打包步骤注释）
           path: |
-            ${{ env.RELEASE_DIR }}/${{ env.SETUP }}
-            ${{ env.RELEASE_DIR }}/${{ env.PORTABLE }}
-            ${{ env.RELEASE_DIR }}/${{ env.GREEN }}.zip
+            ${{ env.RELEASE_DIR }}\${{ env.SETUP }}
+            ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
+            ${{ env.RELEASE_DIR }}\${{ env.GREEN }}.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -203,9 +214,9 @@ jobs:
         with:
           name: QZRS Scrcpy ${{ env.BUILD_TAG }}
           files: |
-            ${{ env.RELEASE_DIR }}/${{ env.SETUP }}
-            ${{ env.RELEASE_DIR }}/${{ env.PORTABLE }}
-            ${{ env.RELEASE_DIR }}/${{ env.GREEN }}.zip
+            ${{ env.RELEASE_DIR }}\${{ env.SETUP }}
+            ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
+            ${{ env.RELEASE_DIR }}\${{ env.GREEN }}.zip
           generate_release_notes: true
           draft: false
           prerelease: false
