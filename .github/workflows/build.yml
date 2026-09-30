@@ -163,37 +163,20 @@ jobs:
           done
           echo "✓ ${GREEN}/ 绿色版目录完整"
 
-      # 绿色版压成 zip：免安装，解压即用。
-      # ⚠️ Compress-Archive -Path 'Dir\*' 会把目录内容摊平到压缩包根层
-      #    （实测 45 个条目，目录不会单独记录），解压后直接看到 QZRS Scrcpy.exe。
-      - name: 绿色版压成 zip
-        shell: bash
+      # 绿色版压成 zip 并校验内容，统一交给脚本做（见脚本头部注释）：
+      #   - 不走内联 powershell 命令：三层转义（bash→PS→cmd）在 runner 上行为不可复现，
+      #     CI 上就因此误判过一次。
+      #   - 不用 Compress-Archive：它遇到读不了的文件**静默跳过**还照样产出 zip，
+      #     改成 .NET ZipFile::CreateFromDirectory，失败即抛错。
+      #   - 校验时把 \ 归一成 / 再比，避免分隔符差异造成误判。
+      - name: 绿色版压成 zip 并校验
+        shell: powershell
         run: |
-          set -euo pipefail
-          cd ../release
-          powershell -NoProfile -Command \
-            "Compress-Archive -Path '${GREEN}\*' -DestinationPath '${GREEN}.zip' -Force"
-          ls -la "${GREEN}.zip"
-
-      # 防 Compress-Archive 少打包：按「必须存在的条目」断言，别用条目数阈值
-      # （实测条目数只有 45，用 >=50 这种阈值会永远失败）
-      - name: 校验 zip 内容
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd ../release
-          powershell -NoProfile -Command \
-            "Add-Type -AssemblyName System.IO.Compression.FileSystem; \
-             \$z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path '${GREEN}.zip')); \
-             \$n=@(\$z.Entries).Count; \
-             \$names=@(\$z.Entries | ForEach-Object { \$_.FullName }); \
-             \$z.Dispose(); \
-             \$need=@('QZRS Scrcpy.exe','resources/app.asar','resources/scrcpy-server', \
-                     'resources/adb/adb.exe','resources/scrcpy/scrcpy.exe'); \
-             \$miss=@(\$need | Where-Object { \$names -notcontains \$_ }); \
-             Write-Host \"entries=\$n\"; \
-             if (\$miss.Count -gt 0) { throw ('压缩包缺少：' + (\$miss -join ', ')) }; \
-             Write-Host '关键文件校验通过'"
+          # 脚本把 zip 写到"当前目录"，所以必须先切到 release 目录；
+          # 脚本路径要用绝对/仓库根相对路径（这里先记下仓库根）。
+          $root = $PWD.Path
+          Set-Location ../release
+          & "$root/.github/scripts/generate-green-zip.ps1" -DirName $env:GREEN
 
       - name: 上传产物（Actions 页面可下载）
         uses: actions/upload-artifact@v4
@@ -221,6 +204,26 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # 用 find 打印实际产物，好看清路径到底叫什么（带空格的目录名最容易出问题）
+      - name: 列出最终产物
+        shell: bash
+        run: |
+          cd ../release
+          echo "::group::release 目录"
+          ls -la
+          echo "::endgroup::"
+          echo "SETUP=${SETUP}"
+          echo "PORTABLE=${PORTABLE}"
+          echo "GREEN=${GREEN}"
+          for f in "${SETUP}" "${PORTABLE}" "${GREEN}.zip"; do
+            if [ -f "$f" ]; then
+              echo "OK   $f  $(( $(stat -c%s "$f") / 1048576 )) MB"
+            else
+              echo "::error::产物缺失：${f}"
+              exit 1
+            fi
+          done
 
       - name: 构建摘要
         shell: bash
