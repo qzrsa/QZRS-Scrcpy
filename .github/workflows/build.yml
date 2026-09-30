@@ -105,7 +105,13 @@ jobs:
           PORTABLE="QZRS-Scrcpy-Portable-${BUILD_TAG}.exe"
           echo "版本号 ${APP_VER} / 编号 ${BUILD_TAG}"
 
-          npx electron-builder --win nsis portable dir --x64
+          # ⚠️ --publish never 必须加：CI 环境下 electron-builder 会自动尝试发布到
+          #    GitHub Releases（日志里的 "Implicit publishing triggered by CI detection"），
+          #    没有 GH_TOKEN 就直接报错退出：
+          #      ⨯ GitHub Personal Access Token is not set, neither programmatically,
+          #        nor using env "GH_TOKEN"
+          #    产物上传/发布由下面的 upload-artifact 与 action-gh-release 负责。
+          npx electron-builder --win nsis portable dir --x64 --publish never
 
           cd ../release
           echo "::group::打包原始产物"
