@@ -1,7 +1,7 @@
 name: Build
 
 # 触发方式：
-#   1. push 到 main        → 自动编译校验 + 打包免安装绿色版（产物可下载）
+#   1. push 到 main        → 自动编译 + 出三种产物（安装版 / 便携版 / 绿色版）
 #   2. 手动 Run workflow   → 想重编随时点一下（可指定版本号后缀，例如本地序号 011）
 #   3. 打 v* tag           → 额外把产物发布到 GitHub Release
 on:
@@ -30,9 +30,10 @@ env:
 
 jobs:
   build-windows:
-    # 必须 Windows runner：产物只有 win 目标（target: dir，extraResources 里是 .exe/.dll）
+    # 必须 Windows runner：产物只有 win 目标（nsis/portable/dir），
+    # 且 extraResources 里全是 .exe/.dll（adb/scrcpy）。
     runs-on: windows-latest
-    timeout-minutes: 40
+    timeout-minutes: 60
 
     steps:
       - name: 检出代码
@@ -50,71 +51,136 @@ jobs:
       - name: 安装依赖
         run: npm ci --registry=https://registry.npmmirror.com
 
+      # ⚠️ 关键修复：不能指望 npm 自动跑 electron 的 postinstall。
+      #    package-lock.json 里 electron 条目**没有 hasInstallScript**，加上 npm 的
+      #    allow-scripts 门禁，postinstall 会被跳过 → node_modules/electron/dist 不存在。
+      #    而 package.json 里写死了 "electronDist": "node_modules/electron/dist"，
+      #    于是 electron-builder 直接报：
+      #      ⨯ The specified electronDist does not exist: ...\node_modules\electron\dist
+      #    所以这里**显式**跑一次官方下载器（已装则秒退，幂等）。
+      - name: 下载 Electron 运行时（补齐 electronDist）
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f node_modules/electron/dist/electron.exe ]; then
+            echo "electron/dist 已存在，跳过"
+          else
+            echo "electron/dist 缺失，显式执行官方下载器…"
+            node node_modules/electron/install.js
+          fi
+          # 硬校验：目录与 exe 都必须真的在
+          test -f node_modules/electron/dist/electron.exe \
+            || { echo "::error::electronDist 下载后仍不存在，请检查 ELECTRON_MIRROR"; exit 1; }
+          echo "electron 运行时：$(cat node_modules/electron/path.txt 2>/dev/null || echo '?')"
+          du -sh node_modules/electron/dist || true
+
       - name: 类型检查
         run: npm run typecheck
 
       - name: 编译（electron-vite build）
         run: npm run build
 
-      # electron-builder 输出到 ../release/win-unpacked（package.json 里 output=../release），
-      # 打包后按项目约定改名成 `QZRS Scrcpy <11位数字>`（8 位日期 + 3 位序号）。
-      - name: 打包免安装绿色版
+      # 出三种产物：
+      #   nsis     → 安装版（标准向导，可选安装目录、建桌面/开始菜单快捷方式）
+      #   portable → 便携版（单文件 exe，双击即用，可拷 U 盘）
+      #   dir      → 绿色版（免安装目录，解压就用）——即 win-unpacked
+      # 版本号：手动传的 label 优先，否则用 run number（3 位补零）。
+      # ⚠️ 产物名不在 package.json 里用 ${env.BUILD_TAG} 拼 —— electron-builder 遇到
+      #    未定义的环境变量会直接报错（cannot expand pattern: env BUILD_TAG is not defined），
+      #    那样本地 `npm run dist` 就废了。所以这里打包完**手动改名**。
+      - name: 打包（安装版 + 便携版 + 绿色版）
         shell: bash
         run: |
           set -euo pipefail
-          npx electron-builder --dir --win --x64
 
-          # 版本号：手动传的 label 优先，否则用 run number（3 位补零）
           if [ -n "${{ github.event.inputs.label }}" ]; then
             SUFFIX="${{ github.event.inputs.label }}"
           else
             SUFFIX=$(printf '%03d' "${{ github.run_number }}")
           fi
-          STAMP="$(date +%Y%m%d)${SUFFIX}"
-          NAME="QZRS Scrcpy ${STAMP}"
-          echo "版本目录：${NAME}"
+          BUILD_TAG="$(date +%Y%m%d)${SUFFIX}"
+          APP_VER=$(node -p "require('./package.json').version")
+          GREEN="QZRS Scrcpy ${BUILD_TAG}"
+          SETUP="QZRS-Scrcpy-Setup-${BUILD_TAG}.exe"
+          PORTABLE="QZRS-Scrcpy-Portable-${BUILD_TAG}.exe"
+          echo "版本号 ${APP_VER} / 编号 ${BUILD_TAG}"
 
-          mkdir -p ../release
-          if [ -d ../release/win-unpacked ]; then
-            mv ../release/win-unpacked "../release/${NAME}"
+          npx electron-builder --win nsis portable dir --x64
+
+          cd ../release
+          echo "::group::打包原始产物"
+          ls -1
+          echo "::endgroup::"
+
+          # 改名为带日期的约定名
+          mv "QZRS Scrcpy Setup ${APP_VER}.exe"      "$SETUP"
+          mv "QZRS Scrcpy ${APP_VER}.exe"            "$PORTABLE"
+          if [ -d win-unpacked ]; then
+            mv win-unpacked "$GREEN"
           fi
+          # 顺手清掉不再需要的元数据（避免被误传到 artifact 里）
+          rm -f "QZRS Scrcpy Setup ${APP_VER}.exe.blockmap" latest.yml builder-debug.yml || true
 
-          # 冒烟校验：exe 必须在，且关键资源都打进去了（打包配置漏项在本地踩过坑）
-          EXE="../release/${NAME}/QZRS Scrcpy.exe"
-          test -f "$EXE" || { echo "::error::找不到 ${EXE}"; exit 1; }
+          echo "::group::改名后产物"
+          ls -la
+          echo "::endgroup::"
+
+          {
+            echo "BUILD_TAG=${BUILD_TAG}"
+            echo "APP_VER=${APP_VER}"
+            echo "GREEN=${GREEN}"
+            echo "SETUP=${SETUP}"
+            echo "PORTABLE=${PORTABLE}"
+          } >> "$GITHUB_ENV"
+
+      # 冒烟校验：三个产物一个都不能少（打包配置漏项在本地踩过坑）
+      - name: 校验产物完整性
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ../release
+
+          # 1) 安装版 + 便携版 exe
+          for f in "${SETUP}" "${PORTABLE}"; do
+            test -f "$f" || { echo "::error::缺少产物：${f}"; ls -la; exit 1; }
+            echo "✓ ${f}  $(( $(stat -c%s "$f") / 1048576 )) MB"
+          done
+
+          # 2) 绿色版目录：exe + 关键资源都要在
+          test -f "${GREEN}/QZRS Scrcpy.exe" \
+            || { echo "::error::绿色版缺少 QZRS Scrcpy.exe"; exit 1; }
           for p in resources/adb/adb.exe resources/scrcpy/scrcpy.exe \
                    resources/scrcpy-server resources/app.asar \
                    resources/adb/AdbWinApi.dll resources/scrcpy/SDL3.dll; do
-            test -e "../release/${NAME}/${p}" || { echo "::error::打包缺文件：${p}"; exit 1; }
+            test -e "${GREEN}/${p}" \
+              || { echo "::error::绿色版缺文件：${p}"; exit 1; }
           done
+          echo "✓ ${GREEN}/ 绿色版目录完整"
 
-          echo "NAME=${NAME}" >> "$GITHUB_ENV"
-
-      # 用 zip：Windows 用户双击即可，免装 7zip。
-      # ⚠️ Compress-Archive -Path 'Dir\*' 会把目录内容摊平到压缩包根层（实测 45 个条目：
-      #    目录不会被单独记录），所以解压后是在当前目录直接看到 QZRS Scrcpy.exe。
-      #    这点已在构建摘要里说明清楚。
-      - name: 生成产物压缩包
+      # 绿色版压成 zip：免安装，解压即用。
+      # ⚠️ Compress-Archive -Path 'Dir\*' 会把目录内容摊平到压缩包根层
+      #    （实测 45 个条目，目录不会单独记录），解压后直接看到 QZRS Scrcpy.exe。
+      - name: 绿色版压成 zip
         shell: bash
         run: |
           set -euo pipefail
           cd ../release
           powershell -NoProfile -Command \
-            "Compress-Archive -Path '${NAME}\*' -DestinationPath '${NAME}.zip' -Force"
-          ls -la
+            "Compress-Archive -Path '${GREEN}\*' -DestinationPath '${GREEN}.zip' -Force"
+          ls -la "${GREEN}.zip"
 
       # 防 Compress-Archive 少打包：按「必须存在的条目」断言，别用条目数阈值
       # （实测条目数只有 45，用 >=50 这种阈值会永远失败）
-      - name: 校验压缩包内容（防 Compress-Archive 少打包）
+      - name: 校验 zip 内容
         shell: bash
         run: |
           set -euo pipefail
           cd ../release
           powershell -NoProfile -Command \
             "Add-Type -AssemblyName System.IO.Compression.FileSystem; \
-             \$z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path '${NAME}.zip')); \
+             \$z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path '${GREEN}.zip')); \
              \$n=@(\$z.Entries).Count; \
-             \$names=\$z.Entries | ForEach-Object { \$_.FullName }; \
+             \$names=@(\$z.Entries | ForEach-Object { \$_.FullName }); \
              \$z.Dispose(); \
              \$need=@('QZRS Scrcpy.exe','resources/app.asar','resources/scrcpy-server', \
                      'resources/adb/adb.exe','resources/scrcpy/scrcpy.exe'); \
@@ -126,8 +192,11 @@ jobs:
       - name: 上传产物（Actions 页面可下载）
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.NAME }}
-          path: ../release/${{ env.NAME }}.zip
+          name: QZRS-Scrcpy-${{ env.BUILD_TAG }}
+          path: |
+            ../release/${{ env.SETUP }}
+            ../release/${{ env.PORTABLE }}
+            ../release/${{ env.GREEN }}.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -136,8 +205,11 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ env.NAME }}
-          files: ../release/${{ env.NAME }}.zip
+          name: QZRS Scrcpy ${{ env.BUILD_TAG }}
+          files: |
+            ../release/${{ env.SETUP }}
+            ../release/${{ env.PORTABLE }}
+            ../release/${{ env.GREEN }}.zip
           generate_release_notes: true
           draft: false
           prerelease: false
@@ -147,16 +219,20 @@ jobs:
       - name: 构建摘要
         shell: bash
         run: |
+          cd ../release
+          setup_mb=$(( $(stat -c%s "${SETUP}") / 1048576 ))
+          port_mb=$(( $(stat -c%s "${PORTABLE}") / 1048576 ))
+          zip_mb=$(( $(stat -c%s "${GREEN}.zip") / 1048576 ))
           {
             echo "## QZRS Scrcpy 构建完成"
             echo ""
-            echo "| 项 | 值 |"
-            echo "| --- | --- |"
-            echo "| 产物目录 | \`${NAME}\` |"
-            echo "| 压缩包 | \`${NAME}.zip\` |"
-            echo "| 提交 | \`${GITHUB_SHA:0:7}\` |"
-            echo "| 触发方式 | ${{ github.event_name }} |"
+            echo "编号 \`${BUILD_TAG}\` ｜ 提交 \`${GITHUB_SHA:0:7}\` ｜ 触发：${{ github.event_name }}"
             echo ""
-            echo "下载：**Actions → 本次 run → Artifacts → ${NAME}**，"
-            echo "解压后直接运行 \`QZRS Scrcpy.exe\`（免安装，adb/scrcpy 已随包附带）。"
+            echo "| 产物 | 文件 | 大小 | 说明 |"
+            echo "| --- | --- | --- | --- |"
+            echo "| 安装版 | \`${SETUP}\` | ${setup_mb} MB | 标准向导安装，可自选目录、建快捷方式 |"
+            echo "| 便携版 | \`${PORTABLE}\` | ${port_mb} MB | 单文件，双击即用，可放 U 盘 |"
+            echo "| 绿色版 | \`${GREEN}.zip\` | ${zip_mb} MB | 免安装目录，解压即用 |"
+            echo ""
+            echo "下载：**Actions → 本次 run → Artifacts → QZRS-Scrcpy-${BUILD_TAG}**"
           } >> "$GITHUB_STEP_SUMMARY"
