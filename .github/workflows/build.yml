@@ -114,6 +114,8 @@ jobs:
           npx electron-builder --win nsis portable dir --x64 --publish never
 
           cd ../release
+          RELEASE_DIR="$(pwd)"
+          echo "release 目录：${RELEASE_DIR}"
           echo "::group::打包原始产物"
           ls -1
           echo "::endgroup::"
@@ -137,6 +139,10 @@ jobs:
             echo "GREEN=${GREEN}"
             echo "SETUP=${SETUP}"
             echo "PORTABLE=${PORTABLE}"
+            # ⚠️ release 目录在仓库外（../release）。upload-artifact@v4 明确拒绝含 '.' / '..'
+            #    的相对路径：Invalid pattern '../release/xxx.exe'. Relative pathing '.' and '..'
+            #    is not allowed. —— 所以这里存一份绝对路径给后面用。
+            echo "RELEASE_DIR=${RELEASE_DIR}"
           } >> "$GITHUB_ENV"
 
       # 冒烟校验：三个产物一个都不能少（打包配置漏项在本地踩过坑）
@@ -182,10 +188,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: QZRS-Scrcpy-${{ env.BUILD_TAG }}
+          # ⚠️ 必须用绝对路径：upload-artifact@v4 不接受 '../release/...'
           path: |
-            ../release/${{ env.SETUP }}
-            ../release/${{ env.PORTABLE }}
-            ../release/${{ env.GREEN }}.zip
+            ${{ env.RELEASE_DIR }}/${{ env.SETUP }}
+            ${{ env.RELEASE_DIR }}/${{ env.PORTABLE }}
+            ${{ env.RELEASE_DIR }}/${{ env.GREEN }}.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -196,9 +203,9 @@ jobs:
         with:
           name: QZRS Scrcpy ${{ env.BUILD_TAG }}
           files: |
-            ../release/${{ env.SETUP }}
-            ../release/${{ env.PORTABLE }}
-            ../release/${{ env.GREEN }}.zip
+            ${{ env.RELEASE_DIR }}/${{ env.SETUP }}
+            ${{ env.RELEASE_DIR }}/${{ env.PORTABLE }}
+            ${{ env.RELEASE_DIR }}/${{ env.GREEN }}.zip
           generate_release_notes: true
           draft: false
           prerelease: false
