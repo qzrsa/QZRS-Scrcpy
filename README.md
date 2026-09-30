@@ -44,7 +44,27 @@ npm run dev
 # 3. 生产构建
 npm run build
 # 产物在 out/ 目录，可用 electron out/main/index.js 或打包工具运行
+
+# 4. 打包免安装绿色版（输出到 ../release/，含 adb / scrcpy / scrcpy-server）
+npm run dist
 ```
+
+## 在 GitHub 上编译（免本地环境）
+
+仓库内置了 GitHub Actions 工作流 [`.github/workflows/build.yml`](.github/workflows/build.yml)，
+不用配本地 Node / 依赖，直接在网页上就能出包：
+
+| 触发方式 | 行为 |
+|----------|------|
+| push 到 `main` | 自动类型检查 → 编译 → 打包绿色版 → 上传为可下载产物 |
+| **Actions → Build → Run workflow**（手动） | 随时重编；可填「产物名后缀」（如本地序号 `011`） |
+| 打 `v*` 标签（如 `git tag v1.0.0`） | 额外自动创建 GitHub Release 并附上压缩包 |
+
+产物命名沿用本地约定 `QZRS Scrcpy <8位日期><3位序号>`：手动触发时可自己填序号与本地对齐，
+否则用 GitHub 的 run number 自动补零。
+
+**拿到产物**：进入 `Actions` → 点开对应那次 run → 页面底部 `Artifacts` 里下载
+`QZRS Scrcpy <编号>.zip`，解压后直接运行 `QZRS Scrcpy.exe`（免安装，adb/scrcpy 均已随包附带）。
 
 ## 连接设备
 

@@ -1,0 +1,162 @@
+name: Build
+
+# 触发方式：
+#   1. push 到 main        → 自动编译校验 + 打包免安装绿色版（产物可下载）
+#   2. 手动 Run workflow   → 想重编随时点一下（可指定版本号后缀，例如本地序号 011）
+#   3. 打 v* tag           → 额外把产物发布到 GitHub Release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      label:
+        description: '产物名后缀（留空则用 run number，例如本地序号 011 就填 011）'
+        required: false
+        default: ''
+
+# 同一分支/标签的旧构建自动取消，避免排队堆积
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write # tag 构建时创建 Release 需要
+
+env:
+  # 国内 runner 走 npmmirror 更快；GitHub 官方 runner 也完全可用
+  ELECTRON_MIRROR: https://npmmirror.com/mirrors/electron/
+  ELECTRON_BUILDER_BINARIES_MIRROR: https://npmmirror.com/mirrors/electron-builder-binaries/
+
+jobs:
+  build-windows:
+    # 必须 Windows runner：产物只有 win 目标（target: dir，extraResources 里是 .exe/.dll）
+    runs-on: windows-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 Node 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      # package-lock.json 里 resolved 已指向 registry.npmmirror.com，
+      # 这里显式指定 registry 做双保险（npm ci 默认按 lock 里的 resolved 拉）。
+      - name: 安装依赖
+        run: npm ci --registry=https://registry.npmmirror.com
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: 编译（electron-vite build）
+        run: npm run build
+
+      # electron-builder 输出到 ../release/win-unpacked（package.json 里 output=../release），
+      # 打包后按项目约定改名成 `QZRS Scrcpy <11位数字>`（8 位日期 + 3 位序号）。
+      - name: 打包免安装绿色版
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx electron-builder --dir --win --x64
+
+          # 版本号：手动传的 label 优先，否则用 run number（3 位补零）
+          if [ -n "${{ github.event.inputs.label }}" ]; then
+            SUFFIX="${{ github.event.inputs.label }}"
+          else
+            SUFFIX=$(printf '%03d' "${{ github.run_number }}")
+          fi
+          STAMP="$(date +%Y%m%d)${SUFFIX}"
+          NAME="QZRS Scrcpy ${STAMP}"
+          echo "版本目录：${NAME}"
+
+          mkdir -p ../release
+          if [ -d ../release/win-unpacked ]; then
+            mv ../release/win-unpacked "../release/${NAME}"
+          fi
+
+          # 冒烟校验：exe 必须在，且关键资源都打进去了（打包配置漏项在本地踩过坑）
+          EXE="../release/${NAME}/QZRS Scrcpy.exe"
+          test -f "$EXE" || { echo "::error::找不到 ${EXE}"; exit 1; }
+          for p in resources/adb/adb.exe resources/scrcpy/scrcpy.exe \
+                   resources/scrcpy-server resources/app.asar \
+                   resources/adb/AdbWinApi.dll resources/scrcpy/SDL3.dll; do
+            test -e "../release/${NAME}/${p}" || { echo "::error::打包缺文件：${p}"; exit 1; }
+          done
+
+          echo "NAME=${NAME}" >> "$GITHUB_ENV"
+
+      # 用 zip：Windows 用户双击即可，免装 7zip。
+      # ⚠️ Compress-Archive -Path 'Dir\*' 会把目录内容摊平到压缩包根层（实测 45 个条目：
+      #    目录不会被单独记录），所以解压后是在当前目录直接看到 QZRS Scrcpy.exe。
+      #    这点已在构建摘要里说明清楚。
+      - name: 生成产物压缩包
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ../release
+          powershell -NoProfile -Command \
+            "Compress-Archive -Path '${NAME}\*' -DestinationPath '${NAME}.zip' -Force"
+          ls -la
+
+      # 防 Compress-Archive 少打包：按「必须存在的条目」断言，别用条目数阈值
+      # （实测条目数只有 45，用 >=50 这种阈值会永远失败）
+      - name: 校验压缩包内容（防 Compress-Archive 少打包）
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd ../release
+          powershell -NoProfile -Command \
+            "Add-Type -AssemblyName System.IO.Compression.FileSystem; \
+             \$z=[IO.Compression.ZipFile]::OpenRead((Resolve-Path '${NAME}.zip')); \
+             \$n=@(\$z.Entries).Count; \
+             \$names=\$z.Entries | ForEach-Object { \$_.FullName }; \
+             \$z.Dispose(); \
+             \$need=@('QZRS Scrcpy.exe','resources/app.asar','resources/scrcpy-server', \
+                     'resources/adb/adb.exe','resources/scrcpy/scrcpy.exe'); \
+             \$miss=@(\$need | Where-Object { \$names -notcontains \$_ }); \
+             Write-Host \"entries=\$n\"; \
+             if (\$miss.Count -gt 0) { throw ('压缩包缺少：' + (\$miss -join ', ')) }; \
+             Write-Host '关键文件校验通过'"
+
+      - name: 上传产物（Actions 页面可下载）
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NAME }}
+          path: ../release/${{ env.NAME }}.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      # 只有打 v* tag 时才发布 Release
+      - name: 发布到 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ env.NAME }}
+          files: ../release/${{ env.NAME }}.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建摘要
+        shell: bash
+        run: |
+          {
+            echo "## QZRS Scrcpy 构建完成"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 产物目录 | \`${NAME}\` |"
+            echo "| 压缩包 | \`${NAME}.zip\` |"
+            echo "| 提交 | \`${GITHUB_SHA:0:7}\` |"
+            echo "| 触发方式 | ${{ github.event_name }} |"
+            echo ""
+            echo "下载：**Actions → 本次 run → Artifacts → ${NAME}**，"
+            echo "解压后直接运行 \`QZRS Scrcpy.exe\`（免安装，adb/scrcpy 已随包附带）。"
+          } >> "$GITHUB_STEP_SUMMARY"
