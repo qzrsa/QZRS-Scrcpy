@@ -29,7 +29,12 @@ const DEFAULT_SETTINGS: AppSettings = {
     showTouches: false,
     powerOffOnClose: false,
     clipboardAutosync: true,
-    audio: false,
+    // 默认开启音频转发，与官方 scrcpy 4.1 的默认行为一致（它是 `--no-audio` 才关），
+    // 也让内置投屏与「Scrcpy 独立窗口」模式行为统一——否则会出现"内置没声音"的困惑。
+    // ⚠️ 注意 getSettings() 是深合并：只在**没存过** audio 字段的机器上生效；
+    //    用户手动关过（settings.json 里 audio:false）的机器会尊重用户选择，不会被改回来。
+    // ⚠️ audio_source=output 会静音设备外放（scrcpy 既定语义），设置页已写明。
+    audio: true,
     audioSource: 'output',
     audioCodec: 'opus',
     audioBitRate: 0

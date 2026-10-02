@@ -192,7 +192,9 @@ function defaultSession(): SessionOptions {
     showTouches: false,
     powerOffOnClose: false,
     clipboardAutosync: true,
-    audio: false,
+    // 与主进程 DEFAULT_SETTINGS 保持一致：默认开启音频（对齐官方 scrcpy 默认行为）。
+    // 这里是渲染层兜底——settings 尚未加载完 / 字段缺失时用它拼 SessionOptions。
+    audio: true,
     audioSource: 'output',
     audioCodec: 'opus',
     audioBitRate: 0

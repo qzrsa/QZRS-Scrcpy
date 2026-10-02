@@ -9,7 +9,7 @@
 | 分类 | 能力 |
 |------|------|
 | 投屏 | H.264/H.265 视频流，WebCodecs 硬件解码，低延迟镜像 |
-| 音频 | 可选转发设备声音到电脑（opus，WebCodecs `AudioDecoder` + WebAudio 播放），需 Android 11+ |
+| 音频 | 转发设备声音到电脑（opus，WebCodecs `AudioDecoder` + WebAudio 播放）。**默认开启**，需 Android 11+；选「系统输出」会同时静音设备外放 |
 | 控制 | 鼠标点击/拖拽 = 触摸，右键 = 返回，中键 = 主页，滚轮 = 滑动，键盘 = 按键 |
 | 群控 | 多设备同时连接，一键广播控制指令 |
 | 屏幕 | 截屏、录屏（screenrecord）、旋转 |

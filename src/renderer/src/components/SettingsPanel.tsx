@@ -216,9 +216,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
             </select>
           </div>
           <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-            需要 <b>Android 11 及以上</b>；低版本会自动退回无声，投屏不受影响。
+            选「系统输出」时<b>设备自身会静音</b>（scrcpy 语义，避免双方同时出声），声音改从电脑扬声器播出；
+            不想让手机静音就改选「麦克风」或关掉本开关。
             <br />
-            选「系统输出」时设备自身会静音（scrcpy 语义，避免双重出声），声音改从电脑扬声器播出。
+            需要 <b>Android 11 及以上</b>，低版本会自动退回无声，投屏不受影响。
+            <br />
+            本项<b>默认开启</b>（与官方 scrcpy 一致）。
           </div>
         </>
       )}
