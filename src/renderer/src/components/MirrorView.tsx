@@ -3,6 +3,7 @@ import type { ControlCommand, KeymapBinding, KeymapConfig, MotionEventAction } f
 import { H264Player } from '../decoder/h264'
 import type { DecoderAcceleration } from '../decoder/h264'
 import { KEYCODE, META, BUTTON, keycodeFromEventCode, normalizeKeyCode } from '../keycodes'
+import { MIRROR_PADDING, fitContain, hasRealVideoSize, relativeRect } from '../videoFit'
 import type { SessionInfo } from '../store'
 import { KeymapEditor, Crosshair } from './KeymapEditor'
 
@@ -110,6 +111,37 @@ export function MirrorView({
     }
   }, [debug, fileLog])
 
+  /**
+   * 把画布的 CSS 显示尺寸按「等比缩放 + 完整可见」写成显式像素。
+   *
+   * 为什么不用纯 CSS：canvas 的 width/height:auto 以**解码缓冲尺寸**为基准，max-width/height
+   * 只能压小不能放大（窗口拖大画布纹丝不动）；而且 .mirror-wrap 高度是 auto 时百分比
+   * max-height 会被浏览器当成 none，竖屏画布会溢出后被 .stage 的 overflow:hidden 裁掉大半。
+   * 详见 videoFit.ts 顶部注释。
+   */
+  const fitCanvas = useCallback((): void => {
+    const wrap = wrapRef.current
+    const canvas = canvasRef.current
+    if (!wrap || !canvas) return
+    // 首帧到达前画布还是 300x150，按它铺开会先闪一个巨大的黑框
+    if (!hasRealVideoSize(canvas.width, canvas.height)) return
+    const box = wrap.getBoundingClientRect()
+    const size = fitContain(box.width, box.height, canvas.width, canvas.height, MIRROR_PADDING)
+    if (size.width <= 0 || size.height <= 0) return
+    canvas.style.width = `${size.width}px`
+    canvas.style.height = `${size.height}px`
+  }, [])
+
+  // stage 尺寸变化（拖窗口 / 进出全屏 / 侧栏开合）都要重算画布显示尺寸。
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const ro = new ResizeObserver(() => fitCanvas())
+    ro.observe(wrap)
+    fitCanvas()
+    return () => ro.disconnect()
+  }, [fitCanvas])
+
   // (Re)create the decoder whenever the active session changes.
   useEffect(() => {
     const canvas = canvasRef.current
@@ -117,6 +149,8 @@ export function MirrorView({
     const player = new H264Player(canvas, { acceleration: decoderAcceleration })
     player.onError = (m) => onError(m)
     player.onStats = onStats
+    // 首帧 / 设备旋转 / 切会话换分辨率都会走到这里，拿到真实尺寸后立刻重算显示尺寸
+    player.onVideoSize = () => fitCanvas()
     playerRef.current = player
 
     const offFrame = window.api.onFrame((e) => {
@@ -634,7 +668,9 @@ export function MirrorView({
         onWheel={onWheel}
         onContextMenu={onContextMenu}
       />
-      {keymap && keymap.overlays.length > 0 && <KeymapOverlayLayer keymap={keymap} />}
+      {keymap && keymap.overlays.length > 0 && (
+        <KeymapOverlayLayer keymap={keymap} videoRef={canvasRef} />
+      )}
       {editing && keymap && onKeymapChange && (
         <KeymapEditor
           keymap={keymap}
@@ -693,22 +729,38 @@ const clamp01 = (v: number): number => Math.min(1, Math.max(0, v))
 /**
  * Draws the passive overlay buttons (准星 etc.) on top of the video canvas.
  * Pure visual; does not consume pointer events.
+ *
+ * 覆盖层用百分比定位，百分比基准必须是**画布**（= 画面），不能是整个 `.mirror-wrap`：
+ * wrap 现在铺满 stage（见 videoFit.ts），若按父级尺寸铺开，准星会以 stage 为基准整体偏移。
  */
-function KeymapOverlayLayer({ keymap }: { keymap: KeymapConfig }): JSX.Element {
+function KeymapOverlayLayer({
+  keymap,
+  videoRef
+}: {
+  keymap: KeymapConfig
+  videoRef: React.RefObject<HTMLCanvasElement | null>
+}): JSX.Element {
   const layerRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const layer = layerRef.current
     if (!layer) return
     const parent = layer.parentElement
     if (!parent) return
-    const ro = new ResizeObserver(() => {
-      const r = parent.getBoundingClientRect()
+    const update = (): void => {
+      const video = videoRef.current
+      if (!video) return
+      const r = relativeRect(parent.getBoundingClientRect(), video.getBoundingClientRect())
+      layer.style.left = `${r.left}px`
+      layer.style.top = `${r.top}px`
       layer.style.width = `${r.width}px`
       layer.style.height = `${r.height}px`
-    })
+    }
+    update()
+    const ro = new ResizeObserver(update)
     ro.observe(parent)
+    if (videoRef.current) ro.observe(videoRef.current)
     return () => ro.disconnect()
-  }, [])
+  }, [videoRef])
 
   return (
     <div ref={layerRef} className="keymap-overlay-layer" aria-hidden="true">

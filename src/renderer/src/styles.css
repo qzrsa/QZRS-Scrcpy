@@ -144,9 +144,10 @@ textarea {
   max-height: 100%;
 }
 
+/* ⚠️ 全屏时不要写 width/height:100%：那会把画布盒子拉成窗口比例，竖屏视频会明显拉伸变形
+   （横屏 1.765≈16:9 看不出来，所以一直没被发现）。尺寸一律交给 MirrorView 的 contain
+   自适应，进出全屏只是让 stage 变成整个窗口，wrap 的 ResizeObserver 会重算。 */
 .app.fullscreen .mirror-canvas {
-  width: 100%;
-  height: 100%;
   max-width: 100%;
   max-height: 100%;
   border-radius: 0;
@@ -520,6 +521,12 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* 铺满 stage：让画布的百分比 max-height 有确定的包含块高度可用。
+     否则 wrap 高度是 auto，浏览器会把 canvas 的 max-height:100% 当成 none
+     → 竖向画布溢出 stage 后被 overflow:hidden 裁掉大半（竖屏设备只剩 30% 可见）。
+     画布的显示尺寸由 MirrorView 按 contain 写成显式像素，见 videoFit.ts。 */
+  width: 100%;
+  height: 100%;
   max-width: 100%;
   max-height: 100%;
 }
@@ -540,7 +547,9 @@ textarea {
   max-height: 100%;
   /* width/height 用 auto，让 intrinsic size（canvas.width/height）作为基准；aspect-ratio 由
      H264Player 在每帧渲染时根据 frame.displayWidth/Height 动态写入，保持画布按 frame
-     物理宽高比缩放，避免竖屏/横屏切换时 max-width/max-height 独立约束导致变形或裁切。 */
+     物理宽高比缩放，避免竖屏/横屏切换时 max-width/max-height 独立约束导致变形或裁切。
+     ⚠️ 这只是首帧前的兜底：真实显示尺寸由 MirrorView 按 contain 写成显式像素
+     （auto + max-* 只能压小不能放大，窗口变大画布不会跟着放大）。 */
   width: auto;
   height: auto;
   border-radius: 6px;

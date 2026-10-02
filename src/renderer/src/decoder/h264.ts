@@ -357,6 +357,7 @@ export class H264Player {
     this.canvas.height = height
     // 同步 CSS 渲染比例，max-width/max-height 缩放时保持 frame 物理宽高比
     this.canvas.style.aspectRatio = `${width} / ${height}`
+    this.onVideoSize?.(width, height)
   }
 
   private extractSpsPps(data: Uint8Array): void {
@@ -486,6 +487,13 @@ export class H264Player {
 
   onError?: (message: string) => void
 
+  /**
+   * 解码缓冲尺寸发生变化时回调（首帧、设备旋转、切会话换分辨率）。
+   * 画布的 CSS 显示尺寸由调用方按这个尺寸重算 —— 见 `videoFit.ts`：
+   * `width/height: auto` 以这个尺寸为基准，窗口变大时画布不会跟着放大。
+   */
+  onVideoSize?: (width: number, height: number) => void
+
   private render(frame: VideoFrame): void {
     if (this.disposed) {
       frame.close()
@@ -497,6 +505,7 @@ export class H264Player {
       // 同步 CSS 渲染比例：max-width/max-height 缩放时保持 frame 物理宽高比
       // （否则竖屏设备在横向窗口里会被 max-height 裁掉底部，max-width 拉出左右黑边）
       this.canvas.style.aspectRatio = `${frame.displayWidth} / ${frame.displayHeight}`
+      this.onVideoSize?.(frame.displayWidth, frame.displayHeight)
     }
     // 先清屏再绘制：避免上一帧或 GPU 未初始化 buffer 残留（硬件 H.264 解码出 corrupt
     // frame 时，残留区会显示 GPU 默认色 = 绿色，导致"大面积纯绿 + 顶部少量内容"）。
