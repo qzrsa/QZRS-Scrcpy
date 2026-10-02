@@ -192,6 +192,15 @@ export interface AppSettings {
   fullscreenMode: 'overlay' | 'window'
   /** 调试模式开启时是否把调试日志写入安装目录/logs/<日期>.log（默认关） */
   debugLogToFile: boolean
+  /**
+   * 额外扫描网段：深度扫描时除本机网卡网段之外**再**扫的地址段。
+   *
+   * 用在设备挂在别的 VLAN / 另一台路由器下、本机网卡上没有那个地址的场景——
+   * 自动枚举永远看不到它，只能手填。元素是用户原始输入的每一条
+   * （`192.168.50` / `192.168.50.0/24` / `192.168.50.7` …），
+   * 解析与归一化交给 @shared/subnet 的 parseSubnets()。
+   */
+  extraScanSubnets: string[]
 }
 
 /**
@@ -267,6 +276,21 @@ export interface AdbShellResult {
 
 export interface OpResult {
   ok: boolean
+  message?: string
+}
+
+/** `devices:scan` 的返回：局域网 5555 端口扫描结果 */
+export interface LanScanResult {
+  ok: boolean
+  /** 端口开放、可 adb connect 的主机 IP（按数值升序） */
+  ips: string[]
+  /**
+   * 本次实际扫描的网段，展示串。自动检测网段按习惯写成 `x.y.z.0/24`；
+   * 设置里手填的条目则是归一化后的形态（`10.0.0.0/22`、单台设备 `192.168.50.7`）。
+   */
+  subnets: string[]
+  /** 手填额外网段里解析失败的条目（只有 settings.json 被手改坏时才会非空） */
+  extraErrors: { raw: string; message: string }[]
   message?: string
 }
 

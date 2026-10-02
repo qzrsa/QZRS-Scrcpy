@@ -1,13 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { LanScanResult } from '@shared/types'
 import { useApp } from '../store'
 import { IconClose, IconWifi, IconUsb, IconPhone, IconRefresh } from './icons'
-
-interface ScanResult {
-  ok: boolean
-  ips: string[]
-  subnets: string[]
-  message?: string
-}
 
 export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element {
   const { devices, refreshDevices } = useApp()
@@ -17,13 +11,14 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
   const [switching, setSwitching] = useState<string | null>(null)
   const [scanning, setScanning] = useState(false)
   const [deep, setDeep] = useState(false)
-  const [scanned, setScanned] = useState<ScanResult | null>(null)
+  const [scanned, setScanned] = useState<LanScanResult | null>(null)
 
   const usbDevices = devices.filter((d) => d.transport !== 'tcpip' && d.state === 'device')
 
   /**
    * 扫描局域网内开放 5555 端口的设备。adb tcpip 模式不发 mDNS 广播，只能扫端口。
-   * all=false 扫物理网卡网段 + 本机回环 127.0.0.0/24（快）；all=true 额外再扫虚拟网卡（VMware/VPN）网段。
+   * all=false 扫物理网卡网段 + 本机回环 127.0.0.0/24（快）；
+   * all=true 再额外扫虚拟网卡（VMware/VPN）网段 + 设置里手填的「额外扫描网段」。
    */
   const scan = useCallback(async (all = false): Promise<void> => {
     setDeep(all)
@@ -104,7 +99,7 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
                 <button
                   className="btn btn-ghost btn-sm"
                   disabled={scanning}
-                  title="额外扫描 VMware / VPN 等虚拟网卡网段（回环 127.0.0.1 两种模式都会扫），覆盖更全但耗时更长"
+                  title="额外扫描 VMware / VPN 等虚拟网卡网段，以及设置里手填的「额外扫描网段」（回环 127.0.0.1 两种模式都会扫），覆盖更全但耗时更长"
                   onClick={() => void scan(true)}
                 >
                   <IconRefresh width={14} height={14} className={scanning && deep ? 'spin' : undefined} />
@@ -115,21 +110,32 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
 
             {scanning && (
               <div className="hint" style={{ marginTop: 6 }}>
-                正在{deep ? '深度' : ''}扫描（{deep ? '全部网卡网段 + 127.0.0.1' : '仅物理网卡网段'}），请稍候…
+                正在{deep ? '深度' : ''}扫描（
+                {deep ? '全部网卡网段 + 手填的额外网段 + 127.0.0.1' : '仅物理网卡网段 + 127.0.0.1'}），请稍候…
               </div>
             )}
 
             {!scanning && scanned?.ok && scanned.ips.length === 0 && (
               <div className="hint" style={{ marginTop: 6 }}>
                 未发现设备。请确认手机已开启无线调试（adb tcpip 5555）且与电脑在同一网段；
-                若手机在其它网段，可试用「深度扫描」（额外扫虚拟网卡网段）。
+                若手机在其它网段，可试用「深度扫描」（额外扫虚拟网卡网段）；
+                如果那个网段本机网卡上根本没有（跨 VLAN / 别的路由器），
+                要在<b>设置 → 额外扫描网段</b>里手动填上它。
+              </div>
+            )}
+
+            {/* settings.json 被手改坏的情况：明确报出来，避免"少扫了一段"却看不出来 */}
+            {!scanning && scanned?.ok && scanned.extraErrors.length > 0 && (
+              <div className="hint" style={{ marginTop: 6, color: 'var(--red, #e74c3c)' }}>
+                设置里的额外扫描网段有 {scanned.extraErrors.length} 条无法解析，已跳过：
+                {scanned.extraErrors.map((e) => `${e.raw}（${e.message}）`).join('；')}
               </div>
             )}
 
             {!scanning && scanned?.ok && scanned.ips.length > 0 && (
               <div style={{ marginTop: 6 }}>
                 <div className="hint" style={{ marginBottom: 4 }}>
-                  已扫描 {scanned.subnets.length ? scanned.subnets.map((s) => `${s}.0/24`).join('、') : '局域网'}
+                  已扫描 {scanned.subnets.length ? scanned.subnets.join('、') : '局域网'}
                   ，发现 {scanned.ips.length} 台
                 </div>
                 {scanned.ips.map((ip) => {

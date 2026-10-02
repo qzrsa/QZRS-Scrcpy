@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { AdbClient, deepScanSubnets, fastScanSubnets, scanLanAdb } from './adb'
+import { mergeRanges, parseSubnets, subnetPrefixToRange, type IpRange, type ParsedSubnets } from '@shared/subnet'
 import { mergeDeviceHistory } from './devices'
 import { ScrcpySession } from './session'
 import { Store, debugLogDirCandidates } from './stores'
@@ -30,6 +31,9 @@ import type {
 export interface AppManager {
   dispose(): Promise<void>
 }
+
+/** 快扫不涉及额外网段时用的空解析结果（复用同一个常量，保证与 parseSubnets 的结构一致） */
+const EMPTY_EXTRA: ParsedSubnets = parseSubnets([])
 
 interface SessionHandle {
   session: ScrcpySession
@@ -433,18 +437,48 @@ export function registerIpc(store: Store): AppManager {
   })
 
   // 扫描局域网内开放 adb 端口的设备（adb tcpip 模式不发 mDNS 广播，只能扫端口）
-  // allSubnets=true 时额外连虚拟机/虚拟网卡网段一起扫（慢很多，按需开启）；回环两种模式都会扫
+  // allSubnets=true 时额外连虚拟机/虚拟网卡网段一起扫（慢很多，按需开启）；回环两种模式都会扫。
+  // 深度扫描还会带上设置里手填的「额外扫描网段」——那是给设备挂在别的 VLAN、
+  // 本机网卡上根本没这个地址的场景兜底的。
   ipcMain.handle('devices:scan', async (_e, port?: number, allSubnets?: boolean) => {
     try {
-      const subnets = allSubnets ? deepScanSubnets() : fastScanSubnets()
-      let found = await scanLanAdb(port ?? 5555, { allSubnets: !!allSubnets })
+      const p = port ?? 5555
+      const prefixes = allSubnets ? deepScanSubnets() : fastScanSubnets()
+      const extras = allSubnets ? parseSubnets(store.getSettings().extraScanSubnets) : EMPTY_EXTRA
+
+      const autoRanges = prefixes
+        .map(subnetPrefixToRange)
+        .filter((r): r is IpRange => r !== null)
+      // 合并重叠/相邻区间：用户的额外网段可能正好落在本机网卡网段内，
+      // mergeRanges 会把它们并成一段，避免同一批地址被扫两遍。
+      const ranges = allSubnets ? mergeRanges([...autoRanges, ...extras.ranges]) : autoRanges
+
+      // 展示用：自动网段按习惯显示成 x.y.z.0/24，用户条目显示其归一化后的串
+      const scanned = [
+        ...prefixes.map((s) => `${s}.0/24`),
+        ...(allSubnets ? extras.display : [])
+      ]
+
+      let found = await scanLanAdb(p, { ranges })
       // 一台都没扫到时自动重试一次：设备偶发无响应会导致误报"未发现"
       if (found.length === 0) {
-        found = await scanLanAdb(port ?? 5555, { allSubnets: !!allSubnets, timeoutMs: 700, concurrency: 96 })
+        found = await scanLanAdb(p, { ranges, timeoutMs: 700, concurrency: 96 })
       }
-      return { ok: true, ips: found, subnets }
+      return {
+        ok: true,
+        ips: found,
+        subnets: scanned,
+        // settings.json 被手改坏时能在这里告诉用户，而不是静默少扫一段
+        extraErrors: allSubnets ? extras.errors : []
+      }
     } catch (err) {
-      return { ok: false, ips: [], subnets: [], message: err instanceof Error ? err.message : String(err) }
+      return {
+        ok: false,
+        ips: [],
+        subnets: [],
+        extraErrors: [],
+        message: err instanceof Error ? err.message : String(err)
+      }
     }
   })
 

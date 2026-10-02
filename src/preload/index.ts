@@ -13,6 +13,7 @@ import type {
   SessionStats,
   AdbShellResult,
   OpResult,
+  LanScanResult,
   AudioMeta,
   AudioFrameEvent
 } from '@shared/types'
@@ -31,10 +32,7 @@ const api = {
   reorderDevices: (orderedSerials: string[]): Promise<OpResult> =>
     ipcRenderer.invoke('devices:reorder', orderedSerials),
   setTcpip: (serial: string, port: number): Promise<OpResult> => ipcRenderer.invoke('device:tcpip', serial, port),
-  scanLanDevices: (
-    port?: number,
-    allSubnets?: boolean
-  ): Promise<{ ok: boolean; ips: string[]; subnets: string[]; message?: string }> =>
+  scanLanDevices: (port?: number, allSubnets?: boolean): Promise<LanScanResult> =>
     ipcRenderer.invoke('devices:scan', port, allSubnets),
 
   startSession: (serial: string, opts: SessionOptions): Promise<{ sessionId: string }> =>

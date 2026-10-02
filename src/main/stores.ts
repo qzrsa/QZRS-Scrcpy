@@ -17,7 +17,11 @@ const DEFAULT_SETTINGS: AppSettings = {
   groupControl: false,
   activeKeymapId: null,
   fullscreenMode: 'overlay' as const,
+  /** 调试模式开启时是否把调试日志写入安装目录/logs/<日期>.log（默认关） */
   debugLogToFile: false,
+  // 额外扫描网段默认留空：这是给"设备挂在别的 VLAN、本机网卡看不到"的场景兜底用的，
+  // 默认多扫任何一段都会拖慢深度扫描，不该由我们替用户决定。
+  extraScanSubnets: [],
   session: {
     bitRate: 8000000,
     maxFps: 0,
@@ -170,7 +174,14 @@ export class Store {
     return {
       ...DEFAULT_SETTINGS,
       ...raw,
-      session: { ...DEFAULT_SETTINGS.session, ...(raw.session ?? {}) }
+      session: { ...DEFAULT_SETTINGS.session, ...(raw.session ?? {}) },
+      // 手改过 settings.json 的话这里可能是字符串甚至数字；渲染层会对它 .join('\n')，
+      // 所以统一收敛成字符串数组，坏值一律当成空（扫描侧 parseSubnets 也会再过滤一遍）。
+      extraScanSubnets: Array.isArray(raw.extraScanSubnets)
+        ? raw.extraScanSubnets.map((x) => String(x))
+        : typeof raw.extraScanSubnets === 'string'
+          ? [raw.extraScanSubnets]
+          : []
     }
   }
 

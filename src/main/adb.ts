@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import net from 'node:net'
 import os from 'node:os'
 import type { DeviceInfo, DeviceState, AdbShellResult } from '@shared/types'
+import { intToIpv4, subnetPrefixToRange, type IpRange } from '@shared/subnet'
 
 /** 本机所有 IPv4 网卡的网段列表（如 ["192.168.11"]），不管物理还是虚拟。 */
 export function localSubnets(): string[] {
@@ -82,6 +83,10 @@ export function fastScanSubnets(): string[] {
 
 /**
  * 「深度扫描」的网段集合 = 本机全部网卡网段（含 VMware / VPN 等虚拟网卡）+ 回环网段。
+ *
+ * 注意这里**不含**用户在设置里手填的额外网段——那些可能是 /22、/32 等任意区间，
+ * 表达不成"一个 /24 前缀"。合并发生在调用方（ipc.ts 的 devices:scan），
+ * 做法是把它和本函数的结果一起转成 IpRange 后交给 scanLanAdb。
  */
 export function deepScanSubnets(): string[] {
   return withLoopback(localSubnets())
@@ -115,7 +120,21 @@ export interface ScanOptions {
   subnets?: string[]
   /** true = 额外连虚拟网卡（VMware/VPN/隧道）网段一起扫，慢很多，用于兜底 */
   allSubnets?: boolean
+  /**
+   * 精确地址区间（优先级最高，给了就不再走 subnets / allSubnets）。
+   * 用于自动检测网段 + 用户手填 CIDR 合并后的统一表达——手填的可能是 /22 或单个 IP，
+   * 不是"一个 /24 前缀"能表示的。
+   */
+  ranges?: IpRange[]
 }
+
+/**
+ * 单次扫描的地址数硬上限（防御性，正常路径不会撞到）。
+ *
+ * 调用方（ipc.ts）已按 MAX_EXTRA_ADDRESSES 限制用户输入，自动检测网段也只会是几个 /24，
+ * 这里再兜一层是为了防止将来有人直接调 scanLanAdb 传个 /8 进来把界面卡死。
+ */
+const MAX_SCAN_ADDRESSES = 65536
 
 /**
  * 扫描局域网内开放 adb 端口的设备，返回 IP 列表（按数值升序）。
@@ -126,19 +145,28 @@ export interface ScanOptions {
  *
  * 默认（快扫）只扫**物理网卡**网段 + 回环网段（排除 VPN/虚拟机网卡，本机实测约 0.85 秒）。
  * 若一台都没扫到，可用 allSubnets=true 兜底扫**全部网卡网段 + 回环网段**。
+ * 另可用 ranges 直接指定区间（含用户手填的任意 CIDR / 单 IP）。
  */
 export async function scanLanAdb(port = 5555, opts: ScanOptions = {}): Promise<string[]> {
   const { timeoutMs = 400, concurrency = 128, allSubnets = false } = opts
-  let subnets = opts.subnets
-  if (!subnets || subnets.length === 0) {
-    subnets = allSubnets ? deepScanSubnets() : fastScanSubnets()
+  let ranges = opts.ranges
+  if (!ranges || ranges.length === 0) {
+    let subnets = opts.subnets
+    if (!subnets || subnets.length === 0) {
+      subnets = allSubnets ? deepScanSubnets() : fastScanSubnets()
+    }
+    if (subnets.length === 0) return []
+    ranges = subnets.map(subnetPrefixToRange).filter((r): r is IpRange => r !== null)
   }
-  if (subnets.length === 0) return []
+  if (ranges.length === 0) return []
 
   const ips: string[] = []
-  for (const s of subnets) {
-    for (let i = 1; i <= 254; i++) ips.push(`${s}.${i}`)
+  for (const r of ranges) {
+    for (let n = r.start; n <= r.end && ips.length < MAX_SCAN_ADDRESSES; n++) {
+      ips.push(intToIpv4(n))
+    }
   }
+  if (ips.length === 0) return []
 
   const found: string[] = []
   let cursor = 0

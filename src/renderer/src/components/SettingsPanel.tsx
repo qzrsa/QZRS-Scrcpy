@@ -1,5 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AppSettings, VideoCodec, DecoderAcceleration } from '@shared/types'
+import {
+  MAX_EXTRA_ADDRESSES,
+  countRanges,
+  estimateScanMs,
+  formatDuration,
+  parseSubnets
+} from '@shared/subnet'
 import { useApp } from '../store'
 import { Drawer } from './Drawer'
 
@@ -9,6 +16,11 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
   const [resolved, setResolved] = useState<{ adbPath: string; serverPath: string; scrcpyPath: string } | null>(null)
   const [hevc, setHevc] = useState<'checking' | 'yes' | 'no'>('checking')
   const [logDir, setLogDir] = useState<string>('')
+  // 额外扫描网段用 textarea 编辑，所以单独存一份原始文本（draft 里那份是字符串数组）
+  const [extraText, setExtraText] = useState<string>(() => (settings.extraScanSubnets ?? []).join('\n'))
+
+  const extra = useMemo(() => parseSubnets(extraText), [extraText])
+  const extraInvalid = extra.errors.length > 0 || extra.overLimit
 
   useEffect(() => {
     void window.api.resolvePaths().then(setResolved)
@@ -41,7 +53,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
     setDraft((d) => ({ ...d, session: { ...d.session, ...p } }))
 
   const save = (): void => {
-    void updateSettings(draft)
+    // 额外网段存归一化后的形态（192.168.50 → 192.168.50.0/24），下次打开能直接看出它到底扫哪儿；
+    // 非法/超限时保存按钮是禁用的，这里再兜一层，避免走到"存进去但解析不了"的状态。
+    if (extraInvalid) return
+    void updateSettings({ ...draft, extraScanSubnets: extra.display })
     onClose()
   }
 
@@ -78,6 +93,61 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
           onChange={(e) => patch({ scrcpyPath: e.target.value })}
         />
         <div className="hint">已检测：{resolved?.scrcpyPath || '未找到'}（仅在 WebCodecs 渲染异常时使用）</div>
+      </div>
+
+      {/*
+        额外扫描网段：给"设备挂在别的 VLAN / 另一台路由器下"的场景兜底。
+        那种情况本机网卡上根本没有目标网段，os.networkInterfaces() 永远枚举不到，只能手填。
+        只在深度扫描时生效——快扫保持"秒回"是它的核心价值，不该被手填内容拖慢。
+      */}
+      <div className="field">
+        <label>额外扫描网段（仅「深度扫描」时生效）</label>
+        <textarea
+          className="textarea"
+          rows={3}
+          spellCheck={false}
+          value={extraText}
+          placeholder={'一行一个，例如：\n192.168.50\n10.0.0.0/22\n192.168.9.7'}
+          onChange={(e) => setExtraText(e.target.value)}
+        />
+        <div className="hint">
+          支持 <code>192.168.50</code>（整个 /24）、<code>192.168.50.0/24</code>、
+          <code>10.0.0.0/22</code>，或 <code>192.168.9.7</code> 单台设备；
+          也可以写 <code>192.168.50.0/255.255.255.0</code> 这种点分掩码。多行、逗号、空格分隔都认。
+          <br />
+          用途：设备挂在其它 VLAN / 另一台路由器下时，本机网卡上没有这个网段，
+          自动扫描永远看不到它。留空即关闭。
+        </div>
+
+        {extra.errors.length > 0 && (
+          <div className="hint" style={{ color: 'var(--red, #e74c3c)', marginTop: -4 }}>
+            {extra.errors.map((e) => (
+              <div key={e.raw}>✗ {e.message}</div>
+            ))}
+          </div>
+        )}
+
+        {extra.overLimit && (
+          <div className="hint" style={{ color: 'var(--red, #e74c3c)', marginTop: -4 }}>
+            ✗ 合计 {extra.totalAddresses} 个地址，超过上限 {MAX_EXTRA_ADDRESSES} 个（约 /20）。
+            端口扫描没有更快的办法，再大就要跑很久了，请拆小一点。
+          </div>
+        )}
+
+        {/*
+          只要解析出了合法条目就显示预览——**即使同时存在错误**。
+          混排（既有能用的段又有打错的段）时，用户需要看到"剩下这些我认对了"，
+          全隐掉反而让人怀疑是不是整段都没被识别。保存按钮此时是禁用的。
+        */}
+        {extra.entries.length > 0 && (
+          <div className="hint" style={{ marginTop: -4 }}>
+            将额外扫描：{extra.display.join('、')}
+            <br />
+            共 {countRanges(extra.ranges)} 个地址
+            {extra.ranges.length < extra.entries.length && '（有重叠，已合并）'}
+            ，预计最坏多花约 {formatDuration(estimateScanMs(countRanges(extra.ranges)))}。
+          </div>
+        )}
       </div>
 
       <div className="field">
@@ -251,8 +321,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         </div>
       )}
 
+      {extraInvalid && (
+        <div className="hint" style={{ color: 'var(--red, #e74c3c)', marginTop: 16 }}>
+          「额外扫描网段」有无法解析或超出上限的条目，修正后才能保存。
+        </div>
+      )}
+
       <div className="row" style={{ marginTop: 20 }}>
-        <button className="btn btn-primary btn-block" onClick={save}>
+        <button
+          className="btn btn-primary btn-block"
+          disabled={extraInvalid}
+          title={extraInvalid ? '额外扫描网段有无法解析或超出上限的条目，请先修正' : undefined}
+          onClick={save}
+        >
           保存设置
         </button>
       </div>
