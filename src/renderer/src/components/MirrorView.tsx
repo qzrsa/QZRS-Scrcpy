@@ -27,6 +27,13 @@ interface Props {
   /** 脚本录制模式：true 时把用户的指针手势转成脚本代码行回传 */
   recording?: boolean
   onRecordGesture?: (codeLine: string) => void
+  /**
+   * 窗口模式下是否让画面随窗口大小自适应缩放（设置项 `mirrorAutoFit`，默认开）。
+   * 关闭时回到原来的静态布局：画布以解码缓冲尺寸为基准，只能压小不能放大。
+   */
+  autoFit?: boolean
+  /** 当前是否处于全屏。全屏一直是 CSS 铺满整个窗口，自适应会主动让位给它 */
+  fullscreen?: boolean
 }
 
 /**
@@ -49,7 +56,9 @@ export function MirrorView({
   onEditClose,
   onKeymapChange,
   recording,
-  onRecordGesture
+  onRecordGesture,
+  autoFit = true,
+  fullscreen = false
 }: Props): JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -118,11 +127,23 @@ export function MirrorView({
    * 只能压小不能放大（窗口拖大画布纹丝不动）；而且 .mirror-wrap 高度是 auto 时百分比
    * max-height 会被浏览器当成 none，竖屏画布会溢出后被 .stage 的 overflow:hidden 裁掉大半。
    * 详见 videoFit.ts 顶部注释。
+   *
+   * 两种情况下必须让位回纯 CSS（并清掉行内宽高，否则行内样式会压过 CSS）：
+   *   - 设置里关掉了「随窗口自适应」→ 保持原来的静态布局；
+   *   - 全屏 → 全屏一直是铺满整个窗口，不需要也不应该被 contain 收窄。
    */
   const fitCanvas = useCallback((): void => {
-    const wrap = wrapRef.current
     const canvas = canvasRef.current
-    if (!wrap || !canvas) return
+    if (!canvas) return
+    if (!autoFit || fullscreen) {
+      if (canvas.style.width || canvas.style.height) {
+        canvas.style.width = ''
+        canvas.style.height = ''
+      }
+      return
+    }
+    const wrap = wrapRef.current
+    if (!wrap) return
     // 首帧到达前画布还是 300x150，按它铺开会先闪一个巨大的黑框
     if (!hasRealVideoSize(canvas.width, canvas.height)) return
     const box = wrap.getBoundingClientRect()
@@ -130,9 +151,18 @@ export function MirrorView({
     if (size.width <= 0 || size.height <= 0) return
     canvas.style.width = `${size.width}px`
     canvas.style.height = `${size.height}px`
-  }, [])
+  }, [autoFit, fullscreen])
 
-  // stage 尺寸变化（拖窗口 / 进出全屏 / 侧栏开合）都要重算画布显示尺寸。
+  // fitCanvas 的依赖里有 autoFit/fullscreen，但下面重建解码器的 effect 依赖只有 sessionId
+  // （不希望切开关就重建解码器）。若把 fitCanvas 直接交给 player.onVideoSize，切开关后会留下
+  // **旧闭包** → 例如关掉设置后再旋转设备，旧闭包仍按 autoFit=true 写回行内像素，开关形同失效。
+  // 用 ref 中转，保证 onVideoSize 拿到的永远是最新那一份。
+  const fitCanvasRef = useRef(fitCanvas)
+  useEffect(() => {
+    fitCanvasRef.current = fitCanvas
+  }, [fitCanvas])
+
+  // stage 尺寸变化（拖窗口 / 进出全屏 / 侧栏开合）与开关切换都要重算画布显示尺寸。
   useEffect(() => {
     const wrap = wrapRef.current
     if (!wrap) return
@@ -149,8 +179,9 @@ export function MirrorView({
     const player = new H264Player(canvas, { acceleration: decoderAcceleration })
     player.onError = (m) => onError(m)
     player.onStats = onStats
-    // 首帧 / 设备旋转 / 切会话换分辨率都会走到这里，拿到真实尺寸后立刻重算显示尺寸
-    player.onVideoSize = () => fitCanvas()
+    // 首帧 / 设备旋转 / 切会话换分辨率都会走到这里，拿到真实尺寸后立刻重算显示尺寸。
+    // 走 ref 取最新实现，避免切「随窗口自适应」开关后这里还握着旧闭包（见 fitCanvasRef）。
+    player.onVideoSize = () => fitCanvasRef.current()
     playerRef.current = player
 
     const offFrame = window.api.onFrame((e) => {
@@ -657,7 +688,7 @@ export function MirrorView({
   const onContextMenu = (e: React.MouseEvent): void => e.preventDefault()
 
   return (
-    <div className="mirror-wrap" ref={wrapRef}>
+    <div className={`mirror-wrap${autoFit && !fullscreen ? ' mirror-wrap--fit' : ''}`} ref={wrapRef}>
       <canvas
         ref={canvasRef}
         className="mirror-canvas"

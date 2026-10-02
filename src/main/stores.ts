@@ -19,6 +19,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   fullscreenMode: 'overlay' as const,
   /** 调试模式开启时是否把调试日志写入安装目录/logs/<日期>.log（默认关） */
   debugLogToFile: false,
+  // 窗口模式下镜像随窗口自适应缩放。默认开：不开的时候画布以解码缓冲尺寸为基准，
+  // max-width/height 只能把它压小，用户把窗口拖大画面纹丝不动（也无法完整显示竖屏设备）。
+  // 仅影响非全屏；全屏一直是 CSS 铺满，不看这一项。
+  mirrorAutoFit: true,
   // 额外扫描网段默认留空：这是给"设备挂在别的 VLAN、本机网卡看不到"的场景兜底用的，
   // 默认多扫任何一段都会拖慢深度扫描，不该由我们替用户决定。
   extraScanSubnets: [],

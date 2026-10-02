@@ -306,6 +306,8 @@ export default function App(): JSX.Element {
             onError={(m) => showToast(m, 'error')}
             decoderAcceleration={settings.decoderAcceleration}
             onStats={handleRenderStats}
+            autoFit={settings.mirrorAutoFit !== false}
+            fullscreen={fullscreen}
             keymap={activeKeymap}
             editing={keymapEditing}
             debug={debugOverlay}

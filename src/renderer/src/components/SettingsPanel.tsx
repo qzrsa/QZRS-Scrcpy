@@ -296,6 +296,16 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         </>
       )}
 
+      <div className="field row between">
+        <label style={{ margin: 0 }}>画面随窗口自适应缩放</label>
+        <Toggle checked={draft.mirrorAutoFit !== false} onChange={(v) => patch({ mirrorAutoFit: v })} />
+      </div>
+      <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        窗口模式下按「等比缩放 + 完整可见」把画面填满可用空间，拖动窗口大小画面会跟着变，竖屏设备也不会被裁掉。
+        <br />
+        关闭后画面按解码分辨率显示，只能缩小不能放大（窗口拖大画面不动）。<b>仅影响非全屏</b>：全屏一直是铺满整个窗口。
+      </div>
+
       <div className="field">
         <label>全屏模式</label>
         <select
