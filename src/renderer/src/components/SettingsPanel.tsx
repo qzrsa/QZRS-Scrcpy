@@ -198,6 +198,31 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         <Toggle checked={draft.session.control} onChange={(v) => patchSession({ control: v })} />
       </div>
 
+      <div className="field row between">
+        <label style={{ margin: 0 }}>转发设备音频到电脑</label>
+        <Toggle checked={draft.session.audio} onChange={(v) => patchSession({ audio: v })} />
+      </div>
+      {draft.session.audio && (
+        <>
+          <div className="field">
+            <label>音频来源</label>
+            <select
+              className="select"
+              value={draft.session.audioSource}
+              onChange={(e) => patchSession({ audioSource: e.target.value as AppSettings['session']['audioSource'] })}
+            >
+              <option value="output">系统输出（同时静音设备外放，推荐）</option>
+              <option value="mic">麦克风（不影响设备外放）</option>
+            </select>
+          </div>
+          <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+            需要 <b>Android 11 及以上</b>；低版本会自动退回无声，投屏不受影响。
+            <br />
+            选「系统输出」时设备自身会静音（scrcpy 语义，避免双重出声），声音改从电脑扬声器播出。
+          </div>
+        </>
+      )}
+
       <div className="field">
         <label>全屏模式</label>
         <select

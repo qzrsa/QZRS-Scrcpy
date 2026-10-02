@@ -28,7 +28,11 @@ const DEFAULT_SETTINGS: AppSettings = {
     stayAwake: true,
     showTouches: false,
     powerOffOnClose: false,
-    clipboardAutosync: true
+    clipboardAutosync: true,
+    audio: false,
+    audioSource: 'output',
+    audioCodec: 'opus',
+    audioBitRate: 0
   }
 }
 

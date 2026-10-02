@@ -12,7 +12,9 @@ import type {
   SessionStateEvent,
   SessionStats,
   AdbShellResult,
-  OpResult
+  OpResult,
+  AudioMeta,
+  AudioFrameEvent
 } from '@shared/types'
 
 const api = {
@@ -138,6 +140,21 @@ const api = {
     const l = (_e: unknown, d: StreamMeta): void => cb(d)
     ipcRenderer.on('session:meta', l)
     return () => ipcRenderer.removeListener('session:meta', l)
+  },
+  onAudioMeta: (cb: (e: AudioMeta) => void): (() => void) => {
+    const l = (_e: unknown, d: AudioMeta): void => cb(d)
+    ipcRenderer.on('session:audio-meta', l)
+    return () => ipcRenderer.removeListener('session:audio-meta', l)
+  },
+  onAudioFrame: (cb: (e: AudioFrameEvent) => void): (() => void) => {
+    const l = (_e: unknown, d: AudioFrameEvent): void => cb(d)
+    ipcRenderer.on('session:audio', l)
+    return () => ipcRenderer.removeListener('session:audio', l)
+  },
+  onAudioDisabled: (cb: (e: { sessionId: string; reason: string }) => void): (() => void) => {
+    const l = (_e: unknown, d: { sessionId: string; reason: string }): void => cb(d)
+    ipcRenderer.on('session:audio-disabled', l)
+    return () => ipcRenderer.removeListener('session:audio-disabled', l)
   },
   onSessionStats: (cb: (e: SessionStats) => void): (() => void) => {
     const l = (_e: unknown, d: SessionStats): void => cb(d)

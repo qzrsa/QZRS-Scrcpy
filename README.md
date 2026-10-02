@@ -9,6 +9,7 @@
 | 分类 | 能力 |
 |------|------|
 | 投屏 | H.264/H.265 视频流，WebCodecs 硬件解码，低延迟镜像 |
+| 音频 | 可选转发设备声音到电脑（opus，WebCodecs `AudioDecoder` + WebAudio 播放），需 Android 11+ |
 | 控制 | 鼠标点击/拖拽 = 触摸，右键 = 返回，中键 = 主页，滚轮 = 滑动，键盘 = 按键 |
 | 群控 | 多设备同时连接，一键广播控制指令 |
 | 屏幕 | 截屏、录屏（screenrecord）、旋转 |
@@ -23,6 +24,7 @@
 - **Electron 44** + **electron-vite 5** + **Vite 7**
 - **React 19** + **TypeScript 7**
 - **WebCodecs `VideoDecoder`**（H.264 Annex-B → AVCC，avcC description）
+- **WebCodecs `AudioDecoder`**（opus + `OpusHead` description）+ **WebAudio** 时间轴排程播放
 - 协议层为独立实现（`src/main/session.ts`、`src/main/protocol.ts`、`src/renderer/src/decoder/h264.ts`），协议规范来自开源项目 [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy)
 
 ## 环境要求
@@ -109,8 +111,10 @@ node smoke-test.mjs
 | 约束 | 说明 |
 |------|------|
 | **scid 必须 31 位** | 服务端 `Options.java` 用 `Integer.parseInt(hex, 16)`（有符号 32 位）解析，高位为 1 会溢出抛 `NumberFormatException`。客户端必须 `& 0x7FFFFFFF`。 |
-| **需连 video + control 两路** | `DesktopConnection.open()` 按 video→audio→control 顺序阻塞 `accept()`，全部接受后才写设备名。只连一路会死锁。 |
-| **连接顺序** | 先连 video（读 1 字节 dummy 确认存活）→ 再连 control → 之后才从 video 读 64 字节设备名。 |
+| **需按序连 socket** | `DesktopConnection.open()` 按 video→audio→control 顺序阻塞 `accept()`，全部接受后才写设备名。顺序错了会死锁；**没开音频时服务端只 accept 两路**，这时不要多连一路。 |
+| **连接顺序** | 先连 video（读 1 字节 dummy 确认存活）→ 若开音频则连 audio（**不读 dummy**，服务端只给第一路写）→ 再连 control → 之后才从 video 读 64 字节设备名。 |
+| **音频流头只有 4 字节** | 音频流是 `[4B codecId][12B 帧头 + 负载]`，**没有**视频那 12 字节 session meta（音频不需要分辨率）。采样率/声道由服务端写死 48000/2。 |
+| **音频禁用是正常路径** | Android < 11、采集失败或配置错误时，服务端不报错而是往音频流写 4 字节 `00000000`/`00000001`。客户端应只关音频，保持视频继续。 |
 | **cleanup 默认 true** | 服务端退出时会自删 `scrcpy-server.jar`，客户端每次会话都需重新 push。 |
 | **分辨率 1088 对齐** | 编码器输出高度会向上对齐到 16（如 1920×1088），渲染时裁掉底部多出的行。 |
 
@@ -129,6 +133,7 @@ src/
 │   ├── App.tsx      # 主布局
 │   ├── components/  # 侧栏/工具栏/镜像/抽屉/各弹窗
 │   ├── decoder/h264.ts  # WebCodecs H.264 解码器
+│   ├── audio/player.ts  # WebCodecs opus 解码 + WebAudio 排程播放
 │   └── store.tsx    # 状态管理
 └── shared/types.ts  # 主/渲染进程共享类型
 ```

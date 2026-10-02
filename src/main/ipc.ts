@@ -22,7 +22,9 @@ import type {
   FrameEvent,
   StreamMeta,
   SessionStateEvent,
-  SessionStats
+  SessionStats,
+  AudioMeta,
+  AudioFrameEvent
 } from '@shared/types'
 
 export interface AppManager {
@@ -362,6 +364,18 @@ export function registerIpc(store: Store): AppManager {
       onStreamMeta: (meta: StreamMeta) => {
         videoSizes.set(meta.sessionId, { width: meta.width, height: meta.height })
         send('session:meta', meta)
+      },
+      onAudioMeta: (meta: AudioMeta) => {
+        send('session:audio-meta', meta)
+      },
+      onAudioFrame: (sid, data, pts, isConfig) => {
+        const evt: AudioFrameEvent = { sessionId: sid, data, pts, isConfig }
+        send('session:audio', evt)
+      },
+      onAudioDisabled: (sid, reason) => {
+        // 音频是可选能力：Android < 11、采集被占用、配置错误都会走这里，视频不受影响
+        log(`[音频] ${reason}`)
+        send('session:audio-disabled', { sessionId: sid, reason })
       },
       onStopped: (sid) => {
         const serial = sessions.get(sid)?.serial ?? ''

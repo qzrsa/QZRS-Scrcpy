@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
 import type { DeviceInfo, AppSettings, KeymapConfig, SessionOptions } from '@shared/types'
+import { playerFor, disposePlayer, disposeAllPlayers } from './audio/player'
 
 export interface SessionInfo {
   sessionId: string
@@ -59,10 +60,12 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
       } else if (e.state === 'error') {
         // 主进程 sessionId(sXXXX) 与占位 id 不同，按 serial 清理（连接失败时避免僵尸占位卡 connecting）。
         setSessions((prev) => prev.filter((s) => s.serial !== e.serial))
+        disposePlayer(e.sessionId)
       } else if (e.state === 'stopped') {
         // 与 started/error 保持一致，按 serial 清理：连接中服务器断开时，占位 id 可能与真实 id 不同，
         // 若仍按 sessionId 过滤会漏掉占位，导致卡片永久显示"运行中"却收不到帧。
         setSessions((prev) => prev.filter((s) => s.serial !== e.serial))
+        disposePlayer(e.sessionId)
       }
     })
     const offMeta = window.api.onStreamMeta((m) => {
@@ -70,10 +73,26 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
         prev.map((s) => (s.sessionId === m.sessionId ? { ...s, width: m.width, height: m.height, codec: m.codec } : s))
       )
     })
+    // ---- 音频 ----
+    // 播放器按会话独立：群控时多台设备各自出声，互不干扰。
+    const offAudioMeta = window.api.onAudioMeta((m) => {
+      playerFor(m.sessionId).configure(m.codec, m.sampleRate, m.channels)
+    })
+    const offAudioFrame = window.api.onAudioFrame((e) => {
+      playerFor(e.sessionId).feed(e.data, e.isConfig, e.pts)
+    })
+    // 主进程已判定音频不可用（Android < 11 / 采集被占用 / 解析错），只关声音不动视频。
+    const offAudioOff = window.api.onAudioDisabled((e) => {
+      disposePlayer(e.sessionId)
+    })
     return () => {
       offDev()
       offState()
       offMeta()
+      offAudioMeta()
+      offAudioFrame()
+      offAudioOff()
+      disposeAllPlayers()
     }
   }, [])
 
@@ -112,6 +131,7 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
 
   const stopSession = useCallback(async (sessionId: string) => {
     await window.api.stopSession(sessionId)
+    disposePlayer(sessionId)
     setSessions((prev) => prev.filter((s) => s.sessionId !== sessionId))
   }, [])
 
@@ -172,7 +192,10 @@ function defaultSession(): SessionOptions {
     showTouches: false,
     powerOffOnClose: false,
     clipboardAutosync: true,
-    audio: false
+    audio: false,
+    audioSource: 'output',
+    audioCodec: 'opus',
+    audioBitRate: 0
   }
 }
 

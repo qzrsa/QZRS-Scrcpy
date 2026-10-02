@@ -39,6 +39,16 @@ export interface DeviceHistoryEntry {
 
 export type VideoCodec = 'h264' | 'h265' | 'av1'
 
+/**
+ * 设备端音频来源（scrcpy `audio_source`）。
+ * - `output`  ：转发整个音频输出，**同时关闭设备端外放**（Android 11+ 才有此源）
+ * - `mic`     ：采集麦克风，不影响外放
+ */
+export type AudioSource = 'output' | 'mic'
+
+/** 设备端音频编码（scrcpy `audio_codec`）。内置播放器目前只解 opus。 */
+export type AudioCodec = 'opus' | 'aac' | 'flac' | 'raw'
+
 /** PC-side WebCodecs decoder hardware-acceleration strategy. */
 export type DecoderAcceleration = 'auto' | 'hardware' | 'software'
 
@@ -63,8 +73,17 @@ export interface SessionOptions {
   powerOffOnClose: boolean
   /** keep clipboard in sync */
   clipboardAutosync: boolean
-  /** audio is disabled in this build (roadmap) */
-  audio: false
+  /**
+   * 转发设备音频到 PC（scrcpy `audio`）。需要 **Android 11 及以上**：
+   * 低版本服务端会回写「本流禁用」，视频照常，不报错。
+   */
+  audio: boolean
+  /** 音频来源；`output` 会同时关掉设备外放 */
+  audioSource: AudioSource
+  /** 音频编码（内置播放器目前只解 opus） */
+  audioCodec: AudioCodec
+  /** 音频码率 bits/s，0 = 服务端默认（128 kbps） */
+  audioBitRate: number
 }
 
 export interface StreamMeta {
@@ -79,6 +98,25 @@ export interface FrameEvent {
   data: Uint8Array
   pts: number
   isKey: boolean
+  isConfig: boolean
+}
+
+/**
+ * 音频流元信息。scrcpy 的音频流头只带 4 字节 codecId（不带分辨率那类 session meta），
+ * 采样率/声道数由服务端写死（AudioConfig：48000 Hz / 2 声道）。
+ */
+export interface AudioMeta {
+  sessionId: string
+  codec: AudioCodec
+  sampleRate: number
+  channels: number
+}
+
+/** 单个音频包。config 包（OpusHead / fLaC extradata）用来 configure 解码器，不送 decode。 */
+export interface AudioFrameEvent {
+  sessionId: string
+  data: Uint8Array
+  pts: number
   isConfig: boolean
 }
 
@@ -144,7 +182,7 @@ export interface AppSettings {
   /** PC-side WebCodecs decoder acceleration strategy */
   decoderAcceleration: DecoderAcceleration
   /** default session options */
-  session: Omit<SessionOptions, 'audio'>
+  session: SessionOptions
   /** whether to enable group control (broadcast input to all sessions) */
   groupControl: boolean
   /** id of the active keymap; null = no keymap active (every key → Android keycode) */
