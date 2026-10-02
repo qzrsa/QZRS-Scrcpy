@@ -307,7 +307,6 @@ export default function App(): JSX.Element {
             decoderAcceleration={settings.decoderAcceleration}
             onStats={handleRenderStats}
             autoFit={settings.mirrorAutoFit !== false}
-            fullscreen={fullscreen}
             keymap={activeKeymap}
             editing={keymapEditing}
             debug={debugOverlay}

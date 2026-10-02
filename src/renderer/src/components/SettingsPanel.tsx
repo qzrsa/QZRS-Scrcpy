@@ -301,9 +301,10 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         <Toggle checked={draft.mirrorAutoFit !== false} onChange={(v) => patch({ mirrorAutoFit: v })} />
       </div>
       <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-        窗口模式下按「等比缩放 + 完整可见」把画面填满可用空间，拖动窗口大小画面会跟着变，竖屏设备也不会被裁掉。
+        按「等比缩放 + 完整可见」让画面随窗口大小变化，窗口模式和全屏都生效，画面<b>不会被拉长或拉宽</b>
+        （竖屏设备全屏时两侧留黑边，不再横向拉伸变形）。
         <br />
-        关闭后画面按解码分辨率显示，只能缩小不能放大（窗口拖大画面不动）。<b>仅影响非全屏</b>：全屏一直是铺满整个窗口。
+        关闭后回到原来的行为：窗口模式按解码分辨率显示（窗口拖大画面不动），全屏铺满整个窗口。
       </div>
 
       <div className="field">

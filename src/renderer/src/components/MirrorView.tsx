@@ -28,12 +28,12 @@ interface Props {
   recording?: boolean
   onRecordGesture?: (codeLine: string) => void
   /**
-   * 窗口模式下是否让画面随窗口大小自适应缩放（设置项 `mirrorAutoFit`，默认开）。
-   * 关闭时回到原来的静态布局：画布以解码缓冲尺寸为基准，只能压小不能放大。
+   * 画面是否随窗口大小自适应缩放（设置项 `mirrorAutoFit`，默认开）。
+   * 开启时按「等比缩放 + 完整可见」算出显示尺寸写成显式像素，窗口模式与全屏都生效，
+   * **画面永远不会被拉长或拉宽**（全屏原来那条 `width/height:100%` 会把竖屏流横向拉宽
+   * 约 2.6 倍，实测正圆变椭圆）。关闭时回到原来的静态布局。
    */
   autoFit?: boolean
-  /** 当前是否处于全屏。全屏一直是 CSS 铺满整个窗口，自适应会主动让位给它 */
-  fullscreen?: boolean
 }
 
 /**
@@ -57,8 +57,7 @@ export function MirrorView({
   onKeymapChange,
   recording,
   onRecordGesture,
-  autoFit = true,
-  fullscreen = false
+  autoFit = true
 }: Props): JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -128,14 +127,17 @@ export function MirrorView({
    * max-height 会被浏览器当成 none，竖屏画布会溢出后被 .stage 的 overflow:hidden 裁掉大半。
    * 详见 videoFit.ts 顶部注释。
    *
-   * 两种情况下必须让位回纯 CSS（并清掉行内宽高，否则行内样式会压过 CSS）：
-   *   - 设置里关掉了「随窗口自适应」→ 保持原来的静态布局；
-   *   - 全屏 → 全屏一直是铺满整个窗口，不需要也不应该被 contain 收窄。
+   * ⚠️ 画面**永远不会被拉长/拉宽**：算出来的一定是等比尺寸（盒子比 == 源比）。
+   * 全屏也走这里 —— 原来全屏靠 CSS 的 width/height:100% 铺满，会把竖屏流横向拉宽
+   * 约 2.6 倍（实测画正圆会变椭圆），现在改成同样的 contain。
+   *
+   * 设置里关掉「随窗口自适应」时必须清掉行内宽高（否则行内样式会压过 CSS），
+   * 让布局回到原来的静态行为（全屏=CSS 铺满，窗口=解码尺寸基准）。
    */
   const fitCanvas = useCallback((): void => {
     const canvas = canvasRef.current
     if (!canvas) return
-    if (!autoFit || fullscreen) {
+    if (!autoFit) {
       if (canvas.style.width || canvas.style.height) {
         canvas.style.width = ''
         canvas.style.height = ''
@@ -151,9 +153,9 @@ export function MirrorView({
     if (size.width <= 0 || size.height <= 0) return
     canvas.style.width = `${size.width}px`
     canvas.style.height = `${size.height}px`
-  }, [autoFit, fullscreen])
+  }, [autoFit])
 
-  // fitCanvas 的依赖里有 autoFit/fullscreen，但下面重建解码器的 effect 依赖只有 sessionId
+  // fitCanvas 的依赖里有 autoFit，但下面重建解码器的 effect 依赖只有 sessionId
   // （不希望切开关就重建解码器）。若把 fitCanvas 直接交给 player.onVideoSize，切开关后会留下
   // **旧闭包** → 例如关掉设置后再旋转设备，旧闭包仍按 autoFit=true 写回行内像素，开关形同失效。
   // 用 ref 中转，保证 onVideoSize 拿到的永远是最新那一份。
@@ -688,7 +690,9 @@ export function MirrorView({
   const onContextMenu = (e: React.MouseEvent): void => e.preventDefault()
 
   return (
-    <div className={`mirror-wrap${autoFit && !fullscreen ? ' mirror-wrap--fit' : ''}`} ref={wrapRef}>
+    // ⚠️ 全屏也要带 --fit：wrap 必须有确定的宽高，否则它是内容尺寸、跟着画布变，
+    //    fitCanvas 量它再写画布就成了循环引用（画布变→wrap 变→RO 再触发→再量…）。
+    <div className={`mirror-wrap${autoFit ? ' mirror-wrap--fit' : ''}`} ref={wrapRef}>
       <canvas
         ref={canvasRef}
         className="mirror-canvas"

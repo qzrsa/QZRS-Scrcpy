@@ -144,9 +144,10 @@ textarea {
   max-height: 100%;
 }
 
-/* ⚠️ 全屏保持「铺满整个窗口」的原有行为，不动它。
-   注意：非全屏的自适应（.mirror-wrap--fit + MirrorView 写显式像素）在全屏时会被
-   主动关掉并清掉行内宽高，好让下面这条规则重新生效。 */
+/* ⚠️ 这条只是「随窗口自适应」**关掉时**（或首帧前）的全屏兜底：把画布盒子铺满整个窗口。
+   注意它会把竖屏流按窗口比例拉宽（实测 2.6 倍、画正圆会变椭圆）—— 所以自适应开启时
+   MirrorView 会写显式行内宽高把这条盖掉（行内样式优先级更高），全屏同样走等比 contain。
+   也就是说：全屏到底铺满还是等比，由设置项 mirrorAutoFit 决定，本条只负责"关掉时"的行为。 */
 .app.fullscreen .mirror-canvas {
   width: 100%;
   height: 100%;
@@ -527,11 +528,11 @@ textarea {
   max-height: 100%;
 }
 
-/* 「镜像随窗口自适应缩放」开启时（且非全屏）才铺满 stage。
+/* 「镜像随窗口自适应缩放」开启时铺满 stage（窗口模式和全屏都要）。
    铺满的意义是让画布的百分比 max-height 有一个「高度确定」的包含块：
-   否则 wrap 高度是 auto，浏览器会把 canvas 的 max-height:100% 当成 none，
-   竖屏画布会按宽度撑得极高、溢出 stage 后被 overflow:hidden 裁掉。
-   画布的显示尺寸由 MirrorView 按 contain 写成显式像素，见 videoFit.ts。
+   否则 wrap 高度是 auto、跟着画布内容变，fitCanvas 量 wrap 再写画布就成了循环引用；
+   而且高度 auto 时浏览器会把 canvas 的 max-height:100% 当成 none。
+   画布的显示尺寸由 MirrorView 按 contain 写成显式像素（等比，不会拉长/拉宽），见 videoFit.ts。
    关闭本项时 wrap 保持内容尺寸 = 原来的静态行为。 */
 .mirror-wrap--fit {
   width: 100%;
