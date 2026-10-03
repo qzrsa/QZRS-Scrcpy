@@ -211,6 +211,14 @@ export interface AppSettings {
    * 解析与归一化交给 @shared/subnet 的 parseSubnets()。
    */
   extraScanSubnets: string[]
+  /**
+   * Python 外挂桥：是否开放本地 HTTP 接口给外部 Python 脚本控制当前投屏会话。
+   * 仅监听 127.0.0.1，Bearer Token 鉴权，复用 scrcpy 控制链路（与 JS 脚本引擎同构）。
+   * 默认关；getSettings() 深合并保证老配置缺字段时走默认值。
+   */
+  bridgeEnabled: boolean
+  /** Python 桥监听端口（1024~65535），仅 127.0.0.1 */
+  bridgePort: number
 }
 
 /**

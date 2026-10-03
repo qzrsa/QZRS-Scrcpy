@@ -18,6 +18,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
   const [logDir, setLogDir] = useState<string>('')
   // 额外扫描网段用 textarea 编辑，所以单独存一份原始文本（draft 里那份是字符串数组）
   const [extraText, setExtraText] = useState<string>(() => (settings.extraScanSubnets ?? []).join('\n'))
+  // Python 桥运行时状态（Token 只在桥运行中才有值）
+  const [bridgeStatus, setBridgeStatus] = useState<{ enabled: boolean; running: boolean; port: number; token: string; clientDir: string } | null>(null)
 
   const extra = useMemo(() => parseSubnets(extraText), [extraText])
   const extraInvalid = extra.errors.length > 0 || extra.overLimit
@@ -25,6 +27,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
   useEffect(() => {
     void window.api.resolvePaths().then(setResolved)
     void window.api.getDebugLogDir().then(setLogDir).catch(() => undefined)
+    void window.api.getBridgeStatus().then(setBridgeStatus).catch(() => undefined)
   }, [])
 
   // 检测内核是否支持 HEVC(H.265) 硬解（依赖主进程开启的 PlatformHEVCDecoderSupport）。
@@ -319,6 +322,48 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         </select>
         <div className="hint">覆盖层：适合投屏小窗；系统级全屏：按 F12 让窗口独占整个显示器（含任务栏消失）</div>
       </div>
+
+      {/*
+        Python 外挂桥：给会写 Python 的用户的外挂能力。
+        只监听 127.0.0.1 + Bearer Token，操作复用与手动控制/JS 脚本同一条 scrcpy 链路，
+        不装任何东西到手机（对比 uiautomator2：无需 init 两 APK + atx-agent，游戏 SurfaceView 也能控制）。
+      */}
+      <div className="field row between">
+        <label style={{ margin: 0 }}>Python 脚本桥（外部 Python 控制手机）</label>
+        <Toggle checked={draft.bridgeEnabled === true} onChange={(v) => patch({ bridgeEnabled: v })} />
+      </div>
+      {draft.bridgeEnabled === true && (
+        <>
+          <div className="field">
+            <label>桥端口</label>
+            <input
+              className="text-input"
+              type="number"
+              min={1024}
+              max={65535}
+              value={draft.bridgePort}
+              onChange={(e) => patch({ bridgePort: Math.min(65535, Math.max(1024, Math.trunc(Number(e.target.value)) || 17399)) })}
+            />
+          </div>
+          <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+            允许<b>本机</b> Python 脚本通过 HTTP 接口控制当前投屏会话：点按 / 滑动 / 按键 / 文本 / 截屏，
+            与内置 JS 脚本引擎共用同一条 scrcpy 控制链路，不往手机装任何东西。
+            仅监听 127.0.0.1，需 Bearer Token 鉴权；保存设置后生效。
+            <br />
+            Token（桥运行时显示，Python 客户端初始化用）：
+            <br />
+            <code style={{ userSelect: 'all' }}>{bridgeStatus?.running ? bridgeStatus.token : '（保存设置并启用后显示）'}</code>
+            <br />
+            客户端库与示例写在
+            {' '}
+            <code style={{ userSelect: 'all' }}>{bridgeStatus?.clientDir || '%APPDATA%\\qzrs-scrcpy\\data\\bridge'}</code>
+            （<code>qzrs.py</code> 客户端 + <code>example.py</code> 示例，Python 仅需标准库）。
+            <button className="btn" style={{ marginTop: 6 }} onClick={() => void window.api.openBridgeDir()}>
+              打开示例目录
+            </button>
+          </div>
+        </>
+      )}
 
       <div className="field row between">
         <label style={{ margin: 0 }}>调试时写入日志文件</label>

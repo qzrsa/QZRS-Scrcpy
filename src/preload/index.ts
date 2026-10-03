@@ -119,6 +119,13 @@ const api = {
   writeClipboard: (text: string): void => ipcRenderer.send('clipboard:write', text),
   readClipboard: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
 
+  /** ---- Python 外挂桥 ---- */
+  /** 桥状态：running/port/token 为运行时值（未启用时 token 为空串），enabled 为设置里的开关 */
+  getBridgeStatus: (): Promise<{ enabled: boolean; running: boolean; port: number; token: string; clientDir: string }> =>
+    ipcRenderer.invoke('bridge:status'),
+  /** 打开桥客户端示例目录（qzrs.py / example.py） */
+  openBridgeDir: (): Promise<OpResult & { dir?: string }> => ipcRenderer.invoke('bridge:openDir'),
+
   onDevicesChanged: (cb: (devices: DeviceInfo[]) => void): (() => void) => {
     const l = (_e: unknown, d: DeviceInfo[]): void => cb(d)
     ipcRenderer.on('devices:changed', l)

@@ -10,6 +10,8 @@ import { ScrcpySession } from './session'
 import { Store, debugLogDirCandidates } from './stores'
 import { DebugFileLogger } from './debuglog'
 import { ScriptEngine } from './scriptengine'
+import { PythonBridge } from './bridge'
+import { writeBridgeClients } from './bridgeclients'
 import { bgraToRgba, matchTemplate, toGray } from './templatematch'
 import { themeBackground } from './theme'
 import { findAdb, findServer, findScrcpy } from './util'
@@ -349,6 +351,44 @@ export function registerIpc(store: Store): AppManager {
     findTemplate
   })
 
+  // ---- Python 外挂桥 ----
+  // 与 JS 脚本引擎同构：设备操作走同一条 sendControl 链路（scrcpy 控制协议），
+  // 截屏复用 adb screencap。桥自己不碰 adb / ScrcpySession。
+  const bridge = new PythonBridge({
+    appVersion: () => app.getVersion(),
+    listSessions: () =>
+      [...sessions.entries()].map(([sessionId, h]) => ({
+        sessionId,
+        serial: h.serial,
+        width: videoSizes.get(sessionId)?.width ?? 0,
+        height: videoSizes.get(sessionId)?.height ?? 0
+      })),
+    sendControl: (sessionId, cmd) => {
+      const h = sessions.get(sessionId)
+      if (h) h.session.sendControl(cmd)
+    },
+    screenshot: async (serial) => ensureAdb().screencap(serial)
+  })
+
+  /** Python 桥客户端目录（qzrs.py / example.py 所在） */
+  function bridgeClientDir(): string {
+    return join(app.getPath('userData'), 'data', 'bridge')
+  }
+
+  /** 按设置启停 Python 桥；客户端文件无论开关与否都写（设置面板要展示目录） */
+  function applyBridge(): void {
+    writeBridgeClients(bridgeClientDir())
+    const s = store.getSettings()
+    if (s.bridgeEnabled) {
+      bridge
+        .start(Math.trunc(s.bridgePort) || 17399)
+        .then(() => log(`[Python桥] 已监听 127.0.0.1:${s.bridgePort}（Token 见设置面板）`))
+        .catch((err) => log(`[Python桥] 启动失败: ${err instanceof Error ? err.message : String(err)}`))
+    } else {
+      void bridge.stop()
+    }
+  }
+
   // ---- session management ----
   function startSession(serial: string, opts: SessionOptions): { sessionId: string } {
     const a = ensureAdb()
@@ -681,6 +721,8 @@ export function registerIpc(store: Store): AppManager {
     }
     // adb 路径可能变了：按新路径重启 track-devices 监听（失败自动退回轮询）
     restartDeviceWatcher()
+    // Python 桥开关/端口可能变了
+    applyBridge()
   })
   ipcMain.handle('settings:resolvePaths', () => {
     try {
@@ -841,6 +883,18 @@ export function registerIpc(store: Store): AppManager {
     return { ok: true, templates: store.getTemplates() }
   })
 
+  // ---- Python 外挂桥 ----
+  ipcMain.handle('bridge:status', () => ({
+    enabled: store.getSettings().bridgeEnabled === true,
+    ...bridge.info(),
+    clientDir: bridgeClientDir()
+  }))
+  ipcMain.handle('bridge:openDir', () => {
+    const dir = writeBridgeClients(bridgeClientDir())
+    void shell.openPath(dir)
+    return { ok: true, dir }
+  })
+
   // ---- fullscreen ----
   ipcMain.handle('fullscreen:enter', async () => {
     const win = getWin()
@@ -994,12 +1048,14 @@ export function registerIpc(store: Store): AppManager {
 
   startDeviceWatcher()
   startAutoReconnect()
+  applyBridge()
   log('应用已启动')
 
   return {
     async dispose() {
       debugLogger.flushSync()
       scriptEngine.stopAll() // 停掉所有运行中的脚本（等价于抬起手指，防止退出后虚拟手指悬挂）
+      await bridge.stop() // Python 桥一并关闭（手势中途退出最多丢一次 UP，scrcpy 会话本身随进程结束）
       killWatcher()
       stopPolling()
       if (reconnectTimer) {

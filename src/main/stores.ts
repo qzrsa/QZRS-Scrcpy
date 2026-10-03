@@ -26,6 +26,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   // 额外扫描网段默认留空：这是给"设备挂在别的 VLAN、本机网卡看不到"的场景兜底用的，
   // 默认多扫任何一段都会拖慢深度扫描，不该由我们替用户决定。
   extraScanSubnets: [],
+  // Python 外挂桥默认关：这是给会写 Python 的用户的外挂能力，不该默认开放端口。
+  bridgeEnabled: false,
+  bridgePort: 17399,
   session: {
     bitRate: 8000000,
     maxFps: 0,
