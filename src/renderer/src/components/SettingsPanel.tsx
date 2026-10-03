@@ -20,6 +20,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
   const [extraText, setExtraText] = useState<string>(() => (settings.extraScanSubnets ?? []).join('\n'))
   // Python 桥运行时状态（Token 只在桥运行中才有值）
   const [bridgeStatus, setBridgeStatus] = useState<{ enabled: boolean; running: boolean; port: number; token: string; clientDir: string } | null>(null)
+  // OCR 模型状态 + 下载进度
+  const [ocr, setOcr] = useState<Awaited<ReturnType<typeof window.api.getOcrStatus>> | null>(null)
+  const [ocrProgress, setOcrProgress] = useState<{ phase: 'downloading' | 'verifying' | 'done' | 'error'; percent: number; file?: string; filePercent?: number; message?: string } | null>(null)
 
   const extra = useMemo(() => parseSubnets(extraText), [extraText])
   const extraInvalid = extra.errors.length > 0 || extra.overLimit
@@ -28,6 +31,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
     void window.api.resolvePaths().then(setResolved)
     void window.api.getDebugLogDir().then(setLogDir).catch(() => undefined)
     void window.api.getBridgeStatus().then(setBridgeStatus).catch(() => undefined)
+    void window.api.getOcrStatus().then(setOcr).catch(() => undefined)
+    const off = window.api.onOcrProgress((p) => {
+      setOcrProgress(p)
+      if (p.phase === 'done' || p.phase === 'error') {
+        void window.api.getOcrStatus().then(setOcr).catch(() => undefined)
+      }
+    })
+    return off
   }, [])
 
   // 检测内核是否支持 HEVC(H.265) 硬解（依赖主进程开启的 PlatformHEVCDecoderSupport）。
@@ -364,6 +375,70 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
           </div>
         </>
       )}
+
+      {/*
+        OCR 识别模型：脚本 findText/ocr 的底层能力。
+        模型不进安装包（省 16MB + 支持后续独立升级），首次使用时在此按需下载。
+      */}
+      <div className="field row between">
+        <label style={{ margin: 0 }}>OCR 识别模型（脚本找文字）</label>
+        <span
+          style={{
+            fontSize: 12,
+            color: ocr?.ready ? '#2ecc71' : ocrProgress?.phase === 'downloading' || ocrProgress?.phase === 'verifying' ? 'var(--accent, #4a9eff)' : 'var(--text-dim, #888)'
+          }}
+        >
+          {ocrProgress?.phase === 'downloading' || ocrProgress?.phase === 'verifying'
+            ? `下载中 ${Math.round(ocrProgress.percent)}%`
+            : ocr?.ready
+              ? '✓ 已就绪'
+              : ocr
+                ? `未下载（缺 ${ocr.files.filter((f) => !f.ok).length} 个文件）`
+                : '…'}
+        </span>
+      </div>
+      <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        供脚本使用「在屏幕上找文字 / 读取文字」（约 16MB，仅首次需要下载，下载到
+        {' '}
+        <code style={{ userSelect: 'all' }}>{ocr?.dir || '<安装目录>\\ocr-models'}</code>
+        ）。
+        {ocrProgress?.phase === 'downloading' && ocrProgress.file && (
+          <>
+            <br />
+            正在下载 <code>{ocrProgress.file}</code>（{Math.round(ocrProgress.filePercent ?? 0)}%）
+            {ocrProgress.message && <span style={{ color: 'var(--text-dim, #888)' }}> · {ocrProgress.message}</span>}
+          </>
+        )}
+        {ocrProgress?.phase === 'verifying' && (
+          <>
+            <br />
+            正在校验 SHA256…
+          </>
+        )}
+        {ocrProgress?.phase === 'error' && (
+          <>
+            <br />
+            <span style={{ color: 'var(--red, #e74c3c)' }}>下载失败：{ocrProgress.message}（已自动重试 3 次）</span>
+          </>
+        )}
+        <div className="row" style={{ marginTop: 6, gap: 8 }}>
+          <button
+            className="btn"
+            disabled={ocr?.ready === true || ocrProgress?.phase === 'downloading' || ocrProgress?.phase === 'verifying'}
+            onClick={() => void window.api.downloadOcrModels()}
+          >
+            {ocr?.ready ? '已下载' : ocrProgress?.phase === 'downloading' || ocrProgress?.phase === 'verifying' ? '下载中…' : '下载模型'}
+          </button>
+          <button className="btn" onClick={() => void window.api.openOcrModelsDir()}>
+            打开模型目录
+          </button>
+          {ocr?.manualUrl && (
+            <button className="btn" onClick={() => void window.api.openOcrManual()}>
+              手动下载（网盘）
+            </button>
+          )}
+        </div>
+      </div>
 
       <div className="field row between">
         <label style={{ margin: 0 }}>调试时写入日志文件</label>

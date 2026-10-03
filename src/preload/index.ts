@@ -126,6 +126,27 @@ const api = {
   /** 打开桥客户端示例目录（qzrs.py / example.py） */
   openBridgeDir: (): Promise<OpResult & { dir?: string }> => ipcRenderer.invoke('bridge:openDir'),
 
+  /** ---- OCR 模型（按需下载，脚本找文字用）---- */
+  /** 模型状态：ready=true 全部就绪；manualUrl 为空表示未配置手动下载入口 */
+  getOcrStatus: (): Promise<{
+    version: string
+    dir: string
+    ready: boolean
+    downloading: boolean
+    manualUrl: string
+    files: { file: string; present: boolean; ok: boolean; size: number }[]
+  }> => ipcRenderer.invoke('ocr:status'),
+  /** 开始下载（异步，进度走 onOcrProgress 事件） */
+  downloadOcrModels: (): Promise<OpResult> => ipcRenderer.invoke('ocr:download'),
+  openOcrModelsDir: (): Promise<OpResult & { dir?: string }> => ipcRenderer.invoke('ocr:openDir'),
+  /** 打开手动下载页（国内网盘；未配置时不动作） */
+  openOcrManual: (): Promise<OpResult> => ipcRenderer.invoke('ocr:openManual'),
+  onOcrProgress: (cb: (p: { phase: 'downloading' | 'verifying' | 'done' | 'error'; percent: number; file?: string; filePercent?: number; message?: string }) => void): (() => void) => {
+    const l = (_e: unknown, d: { phase: 'downloading' | 'verifying' | 'done' | 'error'; percent: number; file?: string; filePercent?: number; message?: string }): void => cb(d)
+    ipcRenderer.on('ocr:progress', l)
+    return () => ipcRenderer.removeListener('ocr:progress', l)
+  },
+
   onDevicesChanged: (cb: (devices: DeviceInfo[]) => void): (() => void) => {
     const l = (_e: unknown, d: DeviceInfo[]): void => cb(d)
     ipcRenderer.on('devices:changed', l)

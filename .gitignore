@@ -21,3 +21,8 @@ resources/_icon_backup_*/
 
 # 本地临时脚本/试验产物（CI 校验脚本等，不进版本库）
 .tmp/
+
+# OCR 模型（约 16MB 二进制，不进 git；源在 ModelScope RapidOCR，发布资产在 GitHub Release ocr-models-v1）
+# 上传/校验工具：.tmp/upload-ocr-release.cjs；模型溯源见 resources/ocr/README.md
+resources/ocr/*.onnx
+resources/ocr/*.txt

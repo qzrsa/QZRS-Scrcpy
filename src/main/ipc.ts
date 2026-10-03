@@ -12,6 +12,8 @@ import { DebugFileLogger } from './debuglog'
 import { ScriptEngine } from './scriptengine'
 import { PythonBridge } from './bridge'
 import { writeBridgeClients } from './bridgeclients'
+import { OcrModelDownloader, type OcrProgress } from './ocrdownload'
+import { ocrStatus as ocrModelsStatus, OCR_MANUAL_URL, resolveOcrModelDir } from './ocrmodels'
 import { bgraToRgba, matchTemplate, toGray } from './templatematch'
 import { themeBackground } from './theme'
 import { findAdb, findServer, findScrcpy } from './util'
@@ -388,6 +390,11 @@ export function registerIpc(store: Store): AppManager {
       void bridge.stop()
     }
   }
+
+  // ---- OCR 模型下载 ----
+  // 模型不进安装包，设置里按需下载（GitHub Release 默认源，electron.net 走系统代理）。
+  const ocrDownloader = new OcrModelDownloader()
+  ocrDownloader.onProgress((p: OcrProgress) => send('ocr:progress', p))
 
   // ---- session management ----
   function startSession(serial: string, opts: SessionOptions): { sessionId: string } {
@@ -893,6 +900,29 @@ export function registerIpc(store: Store): AppManager {
     const dir = writeBridgeClients(bridgeClientDir())
     void shell.openPath(dir)
     return { ok: true, dir }
+  })
+
+  // ---- OCR 模型 ----
+  ipcMain.handle('ocr:status', async () => ({
+    ...(await ocrModelsStatus()),
+    manualUrl: OCR_MANUAL_URL,
+    downloading: ocrDownloader.running
+  }))
+  ipcMain.handle('ocr:download', () => {
+    if (ocrDownloader.running) return { ok: false, message: '已有下载在进行中' }
+    // 异步开跑，进度通过 'ocr:progress' 事件推给渲染层
+    void ocrDownloader.downloadAll()
+    return { ok: true }
+  })
+  ipcMain.handle('ocr:openDir', () => {
+    const dir = resolveOcrModelDir()
+    void shell.openPath(dir)
+    return { ok: true, dir }
+  })
+  ipcMain.handle('ocr:openManual', () => {
+    if (!OCR_MANUAL_URL) return { ok: false, message: '未配置手动下载地址' }
+    void shell.openExternal(OCR_MANUAL_URL)
+    return { ok: true }
   })
 
   // ---- fullscreen ----
