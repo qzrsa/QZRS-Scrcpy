@@ -1,6 +1,6 @@
 {
   "name": "qzrs-scrcpy",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "A modern PC client for scrcpy — mirror and control Android devices with a beautiful UI",
   "author": "QZRS",
   "license": "MIT",
