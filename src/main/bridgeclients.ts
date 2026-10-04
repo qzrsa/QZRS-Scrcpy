@@ -21,7 +21,8 @@ const QZRS_PY = String.raw`# -*- coding: utf-8 -*-
     qz.swipe(540, 1500, 540, 500, duration_ms=400)     # 滑动
     qz.key("BACK")                                     # 按键（名字或数字 keycode）
     qz.text("hello")                                   # 输入文本（<=300 字节）
-    open("shot.png", "wb").write(qz.screenshot())      # 截屏 PNG 字节
+    open("shot.png", "wb").write(qz.screenshot())      # 慢速截屏（设备原始分辨率）
+    open("cur.png", "wb").write(qz.frame())            # 快速取帧（视频分辨率，高频轮询用）
 
 多指并行（finger 编号 0~9，各编号互不干扰）：
     qz.touch_down(1060, 520, finger=0)   # 0 号手指按住开火键不放
@@ -111,9 +112,18 @@ class QzrsClient:
         })
 
     def screenshot(self, session=None):
-        """截屏，返回 PNG 字节。是 adb screencap 的设备原始分辨率（比视频流分辨率高，
-        做找图模板时注意按 info() 里的 width/height 换算）。"""
+        """截屏（慢，~300-500ms），返回 PNG 字节。adb screencap 的设备原始分辨率
+        （比视频流分辨率高，做找图模板时注意按 info() 里的 width/height 换算）。"""
         path = "/api/v1/screenshot"
+        if session is not None:
+            path += "?sessionId=" + urllib.parse.quote(str(session))
+        return self._request("GET", path)
+
+    def frame(self, session=None):
+        """快速取帧（~10ms 级），返回 PNG 字节。投屏视频流最近一帧（视频分辨率，
+        响应头 X-Frame-Width/Height）。高频比色/OCR 用它；
+        ⚠ 模板/比色与截图来源必须同源：别拿 screenshot 采的模板到 frame 上匹配。"""
+        path = "/api/v1/frame"
         if session is not None:
             path += "?sessionId=" + urllib.parse.quote(str(session))
         return self._request("GET", path)

@@ -10,7 +10,7 @@ import { ScrcpySession } from './session'
 import { Store, debugLogDirCandidates } from './stores'
 import { DebugFileLogger } from './debuglog'
 import { ScriptEngine } from './scriptengine'
-import { PythonBridge } from './bridge'
+import { PythonBridge, BridgeHttpError } from './bridge'
 import { writeBridgeClients } from './bridgeclients'
 import { OcrModelDownloader, type OcrProgress } from './ocrdownload'
 import { ocrStatus as ocrModelsStatus, OCR_MANUAL_URL, resolveOcrModelDir } from './ocrmodels'
@@ -369,7 +369,26 @@ export function registerIpc(store: Store): AppManager {
       const h = sessions.get(sessionId)
       if (h) h.session.sendControl(cmd)
     },
-    screenshot: async (serial) => ensureAdb().screencap(serial)
+    screenshot: async (serial) => ensureAdb().screencap(serial),
+    // 取帧：渲染层 MirrorView 按 sessionId 注册了帧提供器（canvas 直出最后一帧）。
+    // 主进程经 executeJavaScript 调用（返回 base64，~MB 级，IPC 开销可忽略）。
+    frame: async (sessionId) => {
+      const win = getWin()
+      if (!win || win.isDestroyed()) throw new BridgeHttpError(503, '主窗口不可用，无法取帧')
+      const sid = JSON.stringify(sessionId)
+      try {
+        const res = (await win.webContents.executeJavaScript(
+          `(window.__qzrsFrameProviders && window.__qzrsFrameProviders[${sid}])` +
+            ` ? window.__qzrsFrameProviders[${sid}]()` +
+            ` : Promise.reject(new Error('该会话的投屏组件未挂载（MirrorView 未显示）'))`,
+          true
+        )) as { width: number; height: number; png: string }
+        return { png: Buffer.from(res.png, 'base64'), width: res.width, height: res.height }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        throw new BridgeHttpError(503, `取帧失败（${msg}）；注意 frame 需要该会话的投屏画面已渲染`)
+      }
+    }
   })
 
   /** Python 桥客户端目录（qzrs.py / example.py 所在） */

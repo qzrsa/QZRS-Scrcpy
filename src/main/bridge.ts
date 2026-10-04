@@ -24,6 +24,12 @@ import type { ControlCommand } from '@shared/types'
  * - POST /api/v1/touchmove              { finger, x, y, sessionId? }         多指原语：拖动（须先 touchdown）
  * - POST /api/v1/touchup                { finger|'all', sessionId? }         多指原语：抬起（幂等；all 一次全抬）
  * - GET  /api/v1/screenshot?sessionId=   返回 PNG 二进制（adb screencap，设备原始分辨率）
+ * - GET  /api/v1/frame?sessionId=        返回 PNG 二进制（投屏视频分辨率最近一帧，~10ms 级）
+ *
+ * screenshot 与 frame 的语义差异（模板/比色必须与所用通道同源）：
+ * - screenshot = adb screencap，设备原始分辨率，300~500ms/次，适合采集模板/低频大图；
+ * - frame      = 投屏视频流最近一帧（渲染层 canvas 直出），快一个量级，适合高频比色/OCR。
+ * 两条通道独立（adb 隧道 vs 内存复制），互不影响；frame 需该会话的 MirrorView 已挂载。
  *
  * 多指原语与 tap/swipe 的本质区别：**tap/swipe 手势完成才返回**（防同 pointerId 交错）；
  * **touchdown/move/up 立即返回**，时序由 Python 侧控制 —— 因此"手指要抬起来"的铁律落在
@@ -58,6 +64,8 @@ export interface PythonBridgeHooks {
   sendControl(sessionId: string, cmd: ControlCommand): void
   /** adb screencap（设备原始分辨率 PNG，含多屏告警前缀清洗） */
   screenshot(serial: string): Promise<Buffer>
+  /** 投屏视频流最近一帧（视频分辨率 PNG；由渲染层 MirrorView 提供该会话的帧） */
+  frame(sessionId: string): Promise<{ png: Buffer; width: number; height: number }>
 }
 
 /** 与 ScriptEngine 一致的 swipe MOVE 插值步长（ms/步） */
@@ -148,6 +156,17 @@ export class PythonBridge {
         const png = await this.screenshot(url.searchParams.get('sessionId'))
         res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': png.length })
         res.end(png)
+        return
+      }
+      if (req.method === 'GET' && path === '/api/v1/frame') {
+        const f = await this.frame(url.searchParams.get('sessionId'))
+        res.writeHead(200, {
+          'Content-Type': 'image/png',
+          'Content-Length': f.png.length,
+          'X-Frame-Width': String(f.width),
+          'X-Frame-Height': String(f.height)
+        })
+        res.end(f.png)
         return
       }
       if (req.method === 'POST') {
@@ -430,5 +449,16 @@ export class PythonBridge {
   private async screenshot(sessionIdRaw: string | null): Promise<Buffer> {
     const s = this.resolve(sessionIdRaw)
     return this.hooks.screenshot(s.serial)
+  }
+
+  private async frame(sessionIdRaw: string | null): Promise<{ png: Buffer; width: number; height: number }> {
+    const s = this.resolve(sessionIdRaw)
+    try {
+      return await this.hooks.frame(s.sessionId)
+    } catch (err) {
+      if (err instanceof BridgeHttpError) throw err
+      // 语义固化：帧提供器缺位/异常（MirrorView 未挂载等）统一 503，与 hook 实现无关
+      throw new BridgeHttpError(503, `取帧失败：${err instanceof Error ? err.message : String(err)}`)
+    }
   }
 }

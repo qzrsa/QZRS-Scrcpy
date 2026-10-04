@@ -41,7 +41,8 @@ qz.swipe(540, 1500, 540, 500, duration_ms=400)    # 滑动
 qz.key("BACK")                                    # 按键（名字或数字 keycode）
 qz.key("A", duration_ms=1000)                     # 按住 A 键 1 秒
 qz.text("hello")                                  # 输入文本（<=300 字节）
-open("shot.png", "wb").write(qz.screenshot())     # 截屏 PNG 字节
+open("shot.png", "wb").write(qz.screenshot())     # 慢速截屏（设备原始分辨率）
+open("cur.png", "wb").write(qz.frame())           # 快速取帧（视频分辨率，高频轮询用）
 ```
 
 ### 多指并行（finger 编号 0~9）
@@ -110,7 +111,13 @@ qz.touch_up(all_fingers=True)         # 收尾：一次抬起全部手指
 
 ### GET /api/v1/screenshot?sessionId=
 
-返回 PNG 二进制（adb screencap，设备原始分辨率，含多屏告警前缀清洗）。
+返回 PNG 二进制（adb screencap，**设备原始分辨率**，含多屏告警前缀清洗）。慢（~300-500ms/次），适合采集找图模板、低频大截图。
+
+### GET /api/v1/frame?sessionId=
+
+返回 PNG 二进制（**投屏视频分辨率**最近一帧，响应头 `X-Frame-Width` / `X-Frame-Height`）。快（~10ms 级），适合高频比色/找色/OCR 轮询。
+
+> ⚠ **模板/比色与截图来源必须同源**：两条通道分辨率不同，别拿 screenshot 采的模板到 frame 上匹配（反之亦然）。投屏分辨率设为 1280x720（与脚本坐标系一致）时两者内容几何一致，仅清晰度不同。两条通道独立（adb 隧道 vs 内存复制），互不影响投屏与控制延迟。frame 需要该会话的投屏画面已渲染（MirrorView 已挂载），否则返回 503。
 
 ---
 

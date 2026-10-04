@@ -192,6 +192,24 @@ export function MirrorView({
       }
     })
 
+    // Python 桥取帧：canvas 始终持有最后一帧（原生解码缓冲尺寸），主进程经
+    // executeJavaScript 调这里的提供器拿 PNG（比 adb screencap 快一个量级）。
+    // 语义注意：这是「投屏视频分辨率」，与 screencap 的设备原始分辨率不同源。
+    if (session) {
+      const w = window as unknown as {
+        __qzrsFrameProviders?: Record<string, () => Promise<{ width: number; height: number; png: string }>>
+      }
+      w.__qzrsFrameProviders ??= {}
+      w.__qzrsFrameProviders[session.sessionId] = async () => {
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
+        if (!blob) throw new Error('canvas.toBlob 返回空')
+        const buf = new Uint8Array(await blob.arrayBuffer())
+        let bin = ''
+        for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000))
+        return { width: canvas.width, height: canvas.height, png: btoa(bin) }
+      }
+    }
+
     // 切回一个已在推流的会话（或初次连接由 connecting→streaming 重建解码器）时，
     // 设备只在流启动时发一次 SPS/PPS config，新建的解码器收不到 config 会一直黑屏。
     // 主动 resetVideo 让设备立即重发 config + 关键帧（官方为"新增播放器"设计的机制）。
@@ -204,6 +222,10 @@ export function MirrorView({
       offFrame()
       player.dispose()
       playerRef.current = null
+      if (session) {
+        const w = window as unknown as { __qzrsFrameProviders?: Record<string, unknown> }
+        if (w.__qzrsFrameProviders) delete w.__qzrsFrameProviders[session.sessionId]
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.sessionId])
