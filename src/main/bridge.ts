@@ -20,7 +20,15 @@ import type { ControlCommand } from '@shared/types'
  * - POST /api/v1/swipe                   { x1, y1, x2, y2, durationMs?, sessionId? }
  * - POST /api/v1/key                     { key, durationMs?, metastate?, sessionId? }
  * - POST /api/v1/text                    { text, sessionId? }
+ * - POST /api/v1/touchdown              { finger?(0~9), x, y, sessionId? }   多指原语：按下，立即返回
+ * - POST /api/v1/touchmove              { finger, x, y, sessionId? }         多指原语：拖动（须先 touchdown）
+ * - POST /api/v1/touchup                { finger|'all', sessionId? }         多指原语：抬起（幂等；all 一次全抬）
  * - GET  /api/v1/screenshot?sessionId=   返回 PNG 二进制（adb screencap，设备原始分辨率）
+ *
+ * 多指原语与 tap/swipe 的本质区别：**tap/swipe 手势完成才返回**（防同 pointerId 交错）；
+ * **touchdown/move/up 立即返回**，时序由 Python 侧控制 —— 因此"手指要抬起来"的铁律落在
+ * 调用方头上，桥做两层兜底：touchup 幂等 + 会话消失时清理跟踪（控制 socket 已死，无需补发）。
+ * finger 编号 0~9 = Android 触摸屏触点上限（协议层 pointerId 是 u64，这里主动收口防滥用）。
  *
  * sessionId 省略时：恰好一个会话就用它；零个或多个都要显式指定（避免误控）。
  */
@@ -67,6 +75,8 @@ export class PythonBridge {
   private server: http.Server | null = null
   private token = ''
   private port = 0
+  /** 多指跟踪：sessionId -> (finger -> 最后按下的坐标)；供 touchup 取坐标 + 会话消失时清理 */
+  private activePointers = new Map<string, Map<number, { x: number; y: number }>>()
 
   constructor(private readonly hooks: PythonBridgeHooks) {}
 
@@ -111,6 +121,7 @@ export class PythonBridge {
     if (!server) return
     this.server = null
     this.port = 0
+    this.activePointers.clear()
     await new Promise<void>((resolve) => {
       server.close(() => resolve())
       // 挂着的 keep-alive 连接不等了（close 回调要等所有连接断开才触发）
@@ -153,6 +164,15 @@ export class PythonBridge {
             return
           case '/api/v1/text':
             reply(200, this.text(body))
+            return
+          case '/api/v1/touchdown':
+            reply(200, this.touchdown(body))
+            return
+          case '/api/v1/touchmove':
+            reply(200, this.touchmove(body))
+            return
+          case '/api/v1/touchup':
+            reply(200, this.touchup(body))
             return
           default:
             throw new BridgeHttpError(404, `未知端点：POST ${path}`)
@@ -243,10 +263,15 @@ export class PythonBridge {
   }
 
   private touch(action: 0 | 1 | 2, x: number, y: number, pressure: number, width: number, height: number, sessionId: string): void {
+    this.rawTouch('finger', action, x, y, pressure, width, height, sessionId)
+  }
+
+  /** 通用触摸注入：pointerId 数字 = 多指原语的 finger 编号；'finger' = tap/swipe 的通用虚拟手指 */
+  private rawTouch(pointerId: number | 'finger', action: 0 | 1 | 2, x: number, y: number, pressure: number, width: number, height: number, sessionId: string): void {
     this.hooks.sendControl(sessionId, {
       type: 'touch',
       action,
-      pointerId: 'finger',
+      pointerId,
       x: Math.max(0, Math.round(x)),
       y: Math.max(0, Math.round(y)),
       width,
@@ -254,6 +279,85 @@ export class PythonBridge {
       pressure,
       buttons: 0
     })
+  }
+
+  // ---- 多指原语（finger 0~9；tap/swipe 的 'finger' 虚拟手指与数字编号互不冲突）----
+
+  /** 清理已消失会话的跟踪条目（会话死了控制 socket 随之关闭，无需补发 UP） */
+  private pruneActivePointers(): void {
+    const ids = new Set(this.hooks.listSessions().map((s) => s.sessionId))
+    for (const k of this.activePointers.keys()) {
+      if (!ids.has(k)) this.activePointers.delete(k)
+    }
+  }
+
+  private static finger(v: unknown): number {
+    const n = Number(v)
+    if (!Number.isInteger(n) || n < 0 || n > 9) {
+      throw new BridgeHttpError(400, `finger 必须是 0~9 的整数：${String(v)}`)
+    }
+    return n
+  }
+
+  private activeFor(sessionId: string): Map<number, { x: number; y: number }> {
+    let m = this.activePointers.get(sessionId)
+    if (!m) {
+      m = new Map()
+      this.activePointers.set(sessionId, m)
+    }
+    return m
+  }
+
+  private touchdown(body: Record<string, unknown>): Record<string, unknown> {
+    this.pruneActivePointers()
+    const s = this.resolve(body['sessionId'])
+    const { width, height } = PythonBridge.videoSize(s)
+    const finger = PythonBridge.finger(body['finger'] ?? 0)
+    const x = this.num(body['x'], 'x')
+    const y = this.num(body['y'], 'y')
+    const m = this.activeFor(s.sessionId)
+    if (m.has(finger)) {
+      throw new BridgeHttpError(409, `finger ${finger} 已按下（先 touchup 再 touchdown）`)
+    }
+    this.rawTouch(finger, 0, x, y, 1, width, height, s.sessionId)
+    m.set(finger, { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)) })
+    return { ok: true, action: 'touchdown', sessionId: s.sessionId, finger, x: Math.round(x), y: Math.round(y), activeFingers: [...m.keys()] }
+  }
+
+  private touchmove(body: Record<string, unknown>): Record<string, unknown> {
+    this.pruneActivePointers()
+    const s = this.resolve(body['sessionId'])
+    const { width, height } = PythonBridge.videoSize(s)
+    const finger = PythonBridge.finger(body['finger'] ?? 0)
+    const x = this.num(body['x'], 'x')
+    const y = this.num(body['y'], 'y')
+    const m = this.activePointers.get(s.sessionId)
+    if (!m || !m.has(finger)) {
+      throw new BridgeHttpError(409, `finger ${finger} 尚未按下（先 touchdown）`)
+    }
+    this.rawTouch(finger, 2, x, y, 1, width, height, s.sessionId)
+    m.set(finger, { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)) })
+    return { ok: true, action: 'touchmove', sessionId: s.sessionId, finger, x: Math.round(x), y: Math.round(y), activeFingers: [...m.keys()] }
+  }
+
+  /** 幂等：抬未按下的手指返回 released:[]（方便 Python finally 里无脑 touchup） */
+  private touchup(body: Record<string, unknown>): Record<string, unknown> {
+    this.pruneActivePointers()
+    const s = this.resolve(body['sessionId'])
+    const { width, height } = PythonBridge.videoSize(s)
+    const m = this.activePointers.get(s.sessionId)
+    const isAll = body['finger'] === 'all' || body['all'] === true
+    const targets = isAll ? [...(m?.keys() ?? [])] : [PythonBridge.finger(body['finger'] ?? 0)]
+    const released: number[] = []
+    for (const f of targets) {
+      const p = m?.get(f)
+      if (!p) continue
+      this.rawTouch(f, 1, p.x, p.y, 0, width, height, s.sessionId)
+      m!.delete(f)
+      released.push(f)
+    }
+    if (m && m.size === 0) this.activePointers.delete(s.sessionId)
+    return { ok: true, action: 'touchup', sessionId: s.sessionId, released, activeFingers: m ? [...m.keys()] : [] }
   }
 
   /**

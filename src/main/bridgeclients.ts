@@ -23,6 +23,13 @@ const QZRS_PY = String.raw`# -*- coding: utf-8 -*-
     qz.text("hello")                                   # 输入文本（<=300 字节）
     open("shot.png", "wb").write(qz.screenshot())      # 截屏 PNG 字节
 
+多指并行（finger 编号 0~9，各编号互不干扰）：
+    qz.touch_down(1060, 520, finger=0)   # 0 号手指按住开火键不放
+    qz.touch_down(600, 600, finger=1)    # 1 号手指同时去点跳跃
+    qz.touch_up(1)                       # 跳跃抬起（0 号继续按着）
+    qz.touch_move(1062, 520, finger=0)   # 0 号边按边小幅拖动（压枪）
+    qz.touch_up(all_fingers=True)        # 收尾：一次抬起全部手指
+
 坐标 = 投屏视频像素坐标（与 app 内调试浮层、内置 JS 脚本引擎一致）。
 session 参数可省略：当前恰好只有一个投屏会话时自动用它；有多个会话必须传
 session=<sessionId>（sessionId 从 info() 里拿）。
@@ -110,6 +117,27 @@ class QzrsClient:
         if session is not None:
             path += "?sessionId=" + urllib.parse.quote(str(session))
         return self._request("GET", path)
+
+    # ---- 多指原语（立即返回，时序自己控制；抬起要自己负责，收尾建议 touch_up(all_fingers=True)）----
+
+    def touch_down(self, x, y, finger=0, session=None):
+        """finger(0~9) 号手指在 (x,y) 按下。立即返回，抬起前保持按下。"""
+        return self._json("POST", "/api/v1/touchdown", {
+            "x": x, "y": y, "finger": finger, "sessionId": self._sid(session),
+        })
+
+    def touch_move(self, x, y, finger=0, session=None):
+        """finger 号手指拖动到 (x,y)。须先 touch_down，否则 409。"""
+        return self._json("POST", "/api/v1/touchmove", {
+            "x": x, "y": y, "finger": finger, "sessionId": self._sid(session),
+        })
+
+    def touch_up(self, finger=0, session=None, all_fingers=False):
+        """抬起 finger 号手指（幂等：没按下也返回成功）。
+        all_fingers=True 抬起该会话全部按下中的手指。"""
+        body = {"sessionId": self._sid(session)}
+        body["finger"] = "all" if all_fingers else finger
+        return self._json("POST", "/api/v1/touchup", body)
 `
 
 const EXAMPLE_PY = String.raw`# -*- coding: utf-8 -*-
