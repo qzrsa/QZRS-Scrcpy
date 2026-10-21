@@ -10,6 +10,8 @@ interface Props {
   onSelect: (serial: string) => void
   onOpenConnect: () => void
   onOpenSettings: () => void
+  /** 打开设置页并直接定位到「软件更新」那一组（更新提示条用） */
+  onOpenUpdate?: () => void
   /**
    * 更新提示文案（null = 不显示）。非空时在「设置」上方多一条可点的提示条：
    * 发现新版本 / 已下好待重启。指向设置页的软件更新区。
@@ -17,7 +19,15 @@ interface Props {
   updateHint?: string | null
 }
 
-export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenConnect, onOpenSettings, updateHint }: Props): JSX.Element {
+export function DeviceSidebar({
+  activeSessionSerial,
+  onStart,
+  onSelect,
+  onOpenConnect,
+  onOpenSettings,
+  onOpenUpdate,
+  updateHint
+}: Props): JSX.Element {
   const { devices, sessions, refreshDevices, stopSession } = useApp()
   const [busy, setBusy] = useState<string | null>(null)
   const [menu, setMenu] = useState<MenuState | null>(null)
@@ -291,7 +301,7 @@ export function DeviceSidebar({ activeSessionSerial, onStart, onSelect, onOpenCo
 
       <div className="sidebar-footer">
         {updateHint && (
-          <button className="update-pill" onClick={onOpenSettings} title="打开设置 · 软件更新">
+          <button className="update-pill" onClick={onOpenUpdate ?? onOpenSettings} title="打开设置 · 软件更新">
             <span className="update-pill-dot" />
             {updateHint}
           </button>

@@ -12,7 +12,17 @@ import { useApp } from '../store'
 import { Drawer } from './Drawer'
 import { IconChevron } from './icons'
 
-export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element {
+export function SettingsPanel({
+  onClose,
+  focusSection
+}: {
+  onClose: () => void
+  /**
+   * 打开时自动滚到某个分区（现在是侧栏「发现新版本」提示 → 软件更新）。
+   * 软更新排在最后一组，不滚一下用户会以为设置页里没有更新入口。
+   */
+  focusSection?: string | null
+}): JSX.Element {
   const { settings, updateSettings } = useApp()
   const [draft, setDraft] = useState<AppSettings>(settings)
   const [resolved, setResolved] = useState<{ adbPath: string; serverPath: string; scrcpyPath: string } | null>(null)
@@ -85,6 +95,16 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
     }
   }, [])
 
+  // 从侧栏「发现新版本」点进来 → 直接滚到软件更新那一组（它在最后，默认在视口外）
+  useEffect(() => {
+    if (!focusSection) return
+    // 等一帧：分组可能因为 openWhen 刚从折叠变成展开，高度还没稳定
+    const t = setTimeout(() => {
+      document.getElementById(`sec-${focusSection}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 160)
+    return () => clearTimeout(t)
+  }, [focusSection])
+
   const patch = (p: Partial<AppSettings>): void => setDraft((d) => ({ ...d, ...p }))
   const patchSession = (p: Partial<AppSettings['session']>): void =>
     setDraft((d) => ({ ...d, session: { ...d.session, ...p } }))
@@ -111,7 +131,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
       {/*
         分区顺序按"多久动一次"排，不按代码里的字段顺序：
           常用（外观 / 画质 / 会话）在前且默认展开；
-          改一次基本不再管（连接 / 扩展 / 调试）折叠收在后面。
+          改一次基本不再管（连接 / 扩展 / 调试）折叠收在后面；
+          「软件更新」永远排最后 —— 它是"平时没事可做、有事才来一次"的操作，
+          放在前面反而挡住常用设置。侧栏「发现新版本」提示点进来时会自动滚到这一组。
         每个分区的展开状态存 localStorage，下次打开保持。
       */}
       <Section id="display" title="外观与画面">
@@ -289,131 +311,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
             </div>
           </>
         )}
-      </Section>
-
-      {/*
-        软件更新：与「快速启动」同一套模型 ——
-          ① 启动时静默查一次（可关）；
-          ② 发现新版本只提示，**下载与安装永远等用户点**；
-          ③ 下载只摊进暂存区，重启后由"退出后助手"统一替换（Windows 上运行中的 exe 不可覆盖）。
-        这里的状态全部来自主进程快照，渲染层不自己推断，避免出现两份真相。
-        默认折叠（平时没事可做），但"有事要办"时 updActionable 会把它展开。
-      */}
-      <Section
-        id="update"
-        title="软件更新"
-        defaultOpen={false}
-        openWhen={updActionable}
-        badge={
-          <span className={`sec-badge upd-status ${upd?.status || ''}`} title="展开查看">
-            {updHead.status}
-          </span>
-        }
-      >
-        <div className="upd-head">
-          <span className="upd-ver">v{upd?.myVersion || '…'}</span>
-          <span className={`upd-status ${upd?.status || 'idle'}`}>{updHead.status}</span>
-          {upd?.checkedAtText && <span className="upd-when">上次检查 {upd.checkedAtText}</span>}
-        </div>
-
-        {/* 状态原因要显式给出来：用户看到"更新不可用"时最需要的是原因
-            （形态不支持？清单没发？超时？），而不是一个静默的灰按钮 */}
-        {upd && !upd.supported && (
-          <div className="hint" style={{ marginTop: -2 }}>
-            {upd.unsupportedReason}
-          </div>
-        )}
-        {/* 形态支持但目录不可写：还能查、不能装。原因单独显示，别和"形态不支持"混成一句 */}
-        {upd?.supported && !upd.dirWritable && (
-          <div className="hint" style={{ marginTop: -2, color: 'var(--red, #e74c3c)' }}>
-            {upd.dirWritableReason}
-          </div>
-        )}
-        {upd?.supported && updHead.extra && (
-          <div className="hint upd-reason" style={{ marginTop: -2 }}>
-            {updHead.extra}
-          </div>
-        )}
-
-        {upd?.progress && (
-          <div className="upd-bar" role="progressbar" aria-valuenow={upd.progress.pct ?? 0} aria-valuemin={0} aria-valuemax={100}>
-            <div className="upd-bar-fill" style={{ width: `${upd.progress.pct ?? 0}%` }} />
-            <span className="upd-bar-text">{upd.progress.text}</span>
-          </div>
-        )}
-
-        <div className="upd-actions">
-          <button
-            className="btn"
-            disabled={!upd?.canCheck}
-            onClick={() => void runUpdate(() => window.api.checkUpdate())}
-          >
-            {upd?.busy ? '请稍候…' : '检查更新'}
-          </button>
-          {upd?.canDownload && upd.plan?.mode === 'delta' && (
-            <span
-              className="upd-when"
-              title={`差量基准 v${upd.plan.from}；换机 / 改过程序文件时会自动退回全量`}
-            >
-              差量 · 省 {(upd.plan.fullSize / Math.max(upd.plan.size, 1)).toFixed(1)}×
-            </span>
-          )}
-          {upd?.canDownload && (
-            <button className="btn btn-primary" onClick={() => void runUpdate(() => window.api.downloadUpdate())}>
-              下载更新{upd.plan ? `（${upd.plan.sizeText}）` : ''}
-            </button>
-          )}
-          {upd?.canApply && (
-            <button className="btn btn-primary" onClick={() => void runUpdate(() => window.api.applyUpdate())}>
-              重启并更新
-            </button>
-          )}
-          <button className="btn btn-ghost" onClick={() => void window.api.openUpdateDir()}>
-            更新目录
-          </button>
-        </div>
-
-        {updErr && (
-          <div className="hint" style={{ color: 'var(--red, #e74c3c)' }}>
-            {updErr}
-          </div>
-        )}
-
-        <div className="upd-row">
-          <span>启动时自动检查更新</span>
-          <Toggle checked={draft.autoUpdate !== false} onChange={(v) => patch({ autoUpdate: v })} />
-        </div>
-
-        <div className="field" style={{ marginTop: 10, marginBottom: 0 }}>
-          <label>更新源（可留空）</label>
-          <input
-            className="text-input"
-            value={draft.updateBase}
-            placeholder="留空 = GitHub releases/latest/download"
-            onChange={(e) => patch({ updateBase: e.target.value })}
-          />
-        </div>
-
-        <div className="hint">
-          <b>安装版与绿色版都支持</b>自动更新（两者目录结构相同）；单文件便携版已停止发布
-          —— 它在运行中无法替换自己，本来就没法自更新。
-          <br />
-          启动时只<b>检查</b>一次（不轮询、不后台常驻），发现新版本会在左侧栏提示；
-          <b>下载与安装永远等你点</b>，不会偷偷替换文件。
-          <br />
-          下载优先走<b>差量</b>（只下和当前版本不同的数据块，常见能省 80% 以上流量）；
-          差量基准对不上（换过机器、手动改过程序文件）时自动退回全量整包，<b>不会因此更新失败</b>。
-          <br />
-          更新只替换程序文件，<b>按键方案 / 脚本 / 日志 / OCR 模型</b>（安装目录下的
-          <code>keymaps</code>、<code>scripts</code>、<code>logs</code>、<code>ocr-models</code>）一律不碰。
-          <br />
-          装到 <code>Program Files</code> 这类需要管理员权限的目录时无法自更新（写不进去），
-          安装时选「用户目录」或非系统盘即可。
-          <br />
-          更新源填镜像或代理时应指向"一次 Release 的资产目录"，例如
-          <code style={{ userSelect: 'all' }}>https://ghproxy.example/https://github.com/qzrsa/QZRS-Scrcpy/releases/latest/download</code>
-          。改了更新源需先<b>保存设置</b>，下一次检查才生效。
-        </div>
       </Section>
 
       <Section id="conn" title="连接与扫描" defaultOpen={false}>
@@ -649,6 +546,131 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         )}
       </Section>
 
+      {/*
+        软件更新：与「快速启动」同一套模型 ——
+          ① 启动时静默查一次（可关）；
+          ② 发现新版本只提示，**下载与安装永远等用户点**；
+          ③ 下载只摊进暂存区，重启后由"退出后助手"统一替换（Windows 上运行中的 exe 不可覆盖）。
+        这里的状态全部来自主进程快照，渲染层不自己推断，避免出现两份真相。
+        默认折叠（平时没事可做），但"有事要办"时 updActionable 会把它展开。
+      */}
+      <Section
+        id="update"
+        title="软件更新"
+        defaultOpen={false}
+        openWhen={updActionable}
+        badge={
+          <span className={`sec-badge upd-status ${upd?.status || ''}`} title="展开查看">
+            {updHead.status}
+          </span>
+        }
+      >
+        <div className="upd-head">
+          <span className="upd-ver">v{upd?.myVersion || '…'}</span>
+          <span className={`upd-status ${upd?.status || 'idle'}`}>{updHead.status}</span>
+          {upd?.checkedAtText && <span className="upd-when">上次检查 {upd.checkedAtText}</span>}
+        </div>
+
+        {/* 状态原因要显式给出来：用户看到"更新不可用"时最需要的是原因
+            （形态不支持？清单没发？超时？），而不是一个静默的灰按钮 */}
+        {upd && !upd.supported && (
+          <div className="hint" style={{ marginTop: -2 }}>
+            {upd.unsupportedReason}
+          </div>
+        )}
+        {/* 形态支持但目录不可写：还能查、不能装。原因单独显示，别和"形态不支持"混成一句 */}
+        {upd?.supported && !upd.dirWritable && (
+          <div className="hint" style={{ marginTop: -2, color: 'var(--red, #e74c3c)' }}>
+            {upd.dirWritableReason}
+          </div>
+        )}
+        {upd?.supported && updHead.extra && (
+          <div className="hint upd-reason" style={{ marginTop: -2 }}>
+            {updHead.extra}
+          </div>
+        )}
+
+        {upd?.progress && (
+          <div className="upd-bar" role="progressbar" aria-valuenow={upd.progress.pct ?? 0} aria-valuemin={0} aria-valuemax={100}>
+            <div className="upd-bar-fill" style={{ width: `${upd.progress.pct ?? 0}%` }} />
+            <span className="upd-bar-text">{upd.progress.text}</span>
+          </div>
+        )}
+
+        <div className="upd-actions">
+          <button
+            className="btn"
+            disabled={!upd?.canCheck}
+            onClick={() => void runUpdate(() => window.api.checkUpdate())}
+          >
+            {upd?.busy ? '请稍候…' : '检查更新'}
+          </button>
+          {upd?.canDownload && upd.plan?.mode === 'delta' && (
+            <span
+              className="upd-when"
+              title={`差量基准 v${upd.plan.from}；换机 / 改过程序文件时会自动退回全量`}
+            >
+              差量 · 省 {(upd.plan.fullSize / Math.max(upd.plan.size, 1)).toFixed(1)}×
+            </span>
+          )}
+          {upd?.canDownload && (
+            <button className="btn btn-primary" onClick={() => void runUpdate(() => window.api.downloadUpdate())}>
+              下载更新{upd.plan ? `（${upd.plan.sizeText}）` : ''}
+            </button>
+          )}
+          {upd?.canApply && (
+            <button className="btn btn-primary" onClick={() => void runUpdate(() => window.api.applyUpdate())}>
+              重启并更新
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={() => void window.api.openUpdateDir()}>
+            更新目录
+          </button>
+        </div>
+
+        {updErr && (
+          <div className="hint" style={{ color: 'var(--red, #e74c3c)' }}>
+            {updErr}
+          </div>
+        )}
+
+        <div className="upd-row">
+          <span>启动时自动检查更新</span>
+          <Toggle checked={draft.autoUpdate !== false} onChange={(v) => patch({ autoUpdate: v })} />
+        </div>
+
+        <div className="field" style={{ marginTop: 10, marginBottom: 0 }}>
+          <label>更新源（可留空）</label>
+          <input
+            className="text-input"
+            value={draft.updateBase}
+            placeholder="留空 = GitHub releases/latest/download"
+            onChange={(e) => patch({ updateBase: e.target.value })}
+          />
+        </div>
+
+        <div className="hint">
+          <b>安装版与绿色版都支持</b>自动更新（两者目录结构相同）；单文件便携版已停止发布
+          —— 它在运行中无法替换自己，本来就没法自更新。
+          <br />
+          启动时只<b>检查</b>一次（不轮询、不后台常驻），发现新版本会在左侧栏提示；
+          <b>下载与安装永远等你点</b>，不会偷偷替换文件。
+          <br />
+          下载优先走<b>差量</b>（只下和当前版本不同的数据块，常见能省 80% 以上流量）；
+          差量基准对不上（换过机器、手动改过程序文件）时自动退回全量整包，<b>不会因此更新失败</b>。
+          <br />
+          更新只替换程序文件，<b>按键方案 / 脚本 / 日志 / OCR 模型</b>（安装目录下的
+          <code>keymaps</code>、<code>scripts</code>、<code>logs</code>、<code>ocr-models</code>）一律不碰。
+          <br />
+          装到 <code>Program Files</code> 这类需要管理员权限的目录时无法自更新（写不进去），
+          安装时选「用户目录」或非系统盘即可。
+          <br />
+          更新源填镜像或代理时应指向"一次 Release 的资产目录"，例如
+          <code style={{ userSelect: 'all' }}>https://ghproxy.example/https://github.com/qzrsa/QZRS-Scrcpy/releases/latest/download</code>
+          。改了更新源需先<b>保存设置</b>，下一次检查才生效。
+        </div>
+      </Section>
+
       {/* 保存栏固定在抽屉底部：分区多了以后，滚到哪儿都能看到"还没保存" */}
       <div className="settings-foot">
         <span className={`settings-foot-note ${extraInvalid ? 'err' : dirty ? 'warn' : ''}`}>
@@ -713,7 +735,7 @@ function Section(props: {
   }
 
   return (
-    <section className={`sec ${open ? 'open' : ''}`}>
+    <section id={`sec-${props.id}`} className={`sec ${open ? 'open' : ''}`}>
       <button className="sec-head" aria-expanded={open} onClick={toggle}>
         <IconChevron className="sec-arrow" width={16} height={16} />
         <span className="sec-title">{props.title}</span>

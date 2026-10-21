@@ -25,6 +25,8 @@ export default function App(): JSX.Element {
   const { devices, sessions, settings, activeKeymap, keymaps, startSession, stopSession, updateSettings, updateKeymaps, setActiveKeymapId } = useApp()
   const [activeSerial, setActiveSerial] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
+  /** 设置页要滚到的分区 id：侧栏「发现新版本」直接定位到「软件更新」 */
+  const [settingsFocus, setSettingsFocus] = useState<string | null>(null)
   const [keymapEditing, setKeymapEditing] = useState(false)
   const [connectOpen, setConnectOpen] = useState(false)
   const [clipboardOpen, setClipboardOpen] = useState(false)
@@ -68,6 +70,12 @@ export default function App(): JSX.Element {
         : null
 
   const showToast = useCallback((msg: string, type: Toast['type'] = 'info') => setToast({ msg, type }), [])
+
+  /** 打开设置页；带 focus 时滚到指定分区（软件更新排在最后，不滚会看不到） */
+  const openSettings = useCallback((focus: string | null = null): void => {
+    setSettingsFocus(focus)
+    setPanel('settings')
+  }, [])
 
   // 拖文件到投屏区 → adb push 到设备（官方 scrcpy 也是这个交互）
   const drop = useStageFileDrop({ serial: activeSession?.serial ?? null, onToast: showToast })
@@ -297,7 +305,8 @@ export default function App(): JSX.Element {
         onStart={handleStart}
         onSelect={handleSelect}
         onOpenConnect={() => setConnectOpen(true)}
-        onOpenSettings={() => setPanel('settings')}
+        onOpenSettings={() => openSettings()}
+        onOpenUpdate={() => openSettings('update')}
         updateHint={updateHint}
       />
 
@@ -320,7 +329,7 @@ export default function App(): JSX.Element {
           onToggleKeymapEdit={handleToggleKeymapEdit}
           onOpenTools={() => setPanel('tools')}
           onOpenScript={() => setPanel('script')}
-          onOpenSettings={() => setPanel('settings')}
+          onOpenSettings={() => openSettings()}
           onStop={() => void handleStop()}
         />
 
@@ -387,7 +396,15 @@ export default function App(): JSX.Element {
         </button>
       )}
 
-      {panel === 'settings' && <SettingsPanel onClose={() => setPanel(null)} />}
+      {panel === 'settings' && (
+        <SettingsPanel
+          focusSection={settingsFocus}
+          onClose={() => {
+            setPanel(null)
+            setSettingsFocus(null)
+          }}
+        />
+      )}
       {panel === 'keymap' && (
         <KeymapPanel
           onClose={() => setPanel(null)}
