@@ -26,6 +26,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
   // 自更新状态（主进程快照，渲染层只读）
   const [upd, setUpd] = useState<UpdateSnapshot | null>(null)
   const [updErr, setUpdErr] = useState('')
+  // 更新状态行的文案（版本号并进状态行，重复的 reason 已剔掉），规则见 updateHeadText()
+  const updHead = updateHeadText(upd)
 
   useEffect(() => {
     void window.api.getUpdateState().then(setUpd).catch(() => undefined)
@@ -203,7 +205,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         <label>软件更新</label>
         <div className="upd-head">
           <span className="upd-ver">v{upd?.myVersion || '…'}</span>
-          <span className={`upd-status ${upd?.status || 'idle'}`}>{upd?.statusText || '…'}</span>
+          <span className={`upd-status ${upd?.status || 'idle'}`}>{updHead.status}</span>
           {upd?.checkedAtText && <span className="upd-when">上次检查 {upd.checkedAtText}</span>}
         </div>
 
@@ -220,9 +222,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
             {upd.dirWritableReason}
           </div>
         )}
-        {upd?.supported && upd.reason && (
-          <div className="hint" style={{ marginTop: -2 }}>
-            {upd.reason}
+        {upd?.supported && updHead.extra && (
+          <div className="hint upd-reason" style={{ marginTop: -2 }}>
+            {updHead.extra}
           </div>
         )}
 
@@ -615,6 +617,30 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
       </div>
     </Drawer>
   )
+}
+
+/**
+ * 更新卡片的两行文案：状态行 + 补充原因（没有可补充的就是空串）。
+ *
+ * 主进程给了 statusText 与 reason 两份信息，用途不同：前者是"阶段"，后者是"为什么"。
+ * 但有两处会撞车，直接并排渲染就成了用户看到的：
+ *
+ *   v1.4.1  已是最新版本                                  ← statusText
+ *   已是最新版本                                          ← reason（一字不差）
+ *
+ * 所以这里的规则是：
+ *   1. `available` 时把目标版本号**并进状态行**（"发现新版本 v1.4.2"），和侧栏提示同一口径；
+ *   2. reason 与状态行一字不差 → 丢掉（uptodate / downloading 这类阶段名本身就是答案）；
+ *   3. 其余 reason 保留 —— 它们才有信息量（更新源没有清单 / 清单属于别的程序 / 具体报错）。
+ */
+function updateHeadText(u: UpdateSnapshot | null): { status: string; extra: string } {
+  if (!u) return { status: '…', extra: '' }
+  const status = u.status === 'available' && u.latest ? `发现新版本 v${u.latest}` : u.statusText || '…'
+  const reason = u.reason || ''
+  if (!u.supported || !reason) return { status, extra: '' }
+  if (reason === u.statusText || reason === status) return { status, extra: '' }
+  if (u.status === 'available' && reason === `发现 v${u.latest}`) return { status, extra: '' }
+  return { status, extra: reason }
 }
 
 function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }): JSX.Element {
