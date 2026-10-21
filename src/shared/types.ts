@@ -430,6 +430,22 @@ export interface ListDirResult {
   message?: string
 }
 
+/**
+ * 设备端「移动 / 复制」的结果。
+ *
+ * 一次可以带多个源，所以标准结果不是一个布尔值：
+ *   - `ok=false`  → 整体没能执行（目标不是目录 / 不可写 / adb 通信失败），看 `message`
+ *   - `conflicts` → 目标已有同名项（只在 overwrite=false 时出现，UI 要二次确认再重试）
+ *   - `failed`    → 单个条目失败（权限、跨分区、源消失…），其余条目照常处理
+ */
+export interface FileTransferResult {
+  ok: boolean
+  message?: string
+  okNames: string[]
+  conflicts: string[]
+  failed: { name: string; message: string }[]
+}
+
 /** `devices:scan` 的返回：局域网 5555 端口扫描结果 */
 export interface LanScanResult {
   ok: boolean

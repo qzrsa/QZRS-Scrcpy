@@ -248,3 +248,24 @@ export const IconFile = (p: P): JSX.Element => (
     <path d="M14 2v6h6" />
   </svg>
 )
+export const IconCopy = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+)
+export const IconMove = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <path d="M5 9l-3 3 3 3" />
+    <path d="M9 5l3-3 3 3" />
+    <path d="M15 19l-3 3-3-3" />
+    <path d="M19 9l3 3-3 3" />
+    <path d="M2 12h20" />
+    <path d="M12 2v20" />
+  </svg>
+)
+export const IconCheck = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <path d="M20 6 9 17l-5-5" />
+  </svg>
+)

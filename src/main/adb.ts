@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import net from 'node:net'
 import os from 'node:os'
-import type { DeviceInfo, DeviceState, AdbShellResult, ListDirResult, RemoteEntry } from '@shared/types'
+import type { DeviceInfo, DeviceState, AdbShellResult, ListDirResult, RemoteEntry, FileTransferResult } from '@shared/types'
 
 /** shell 单引号转义：把 ' 变成 '\'' ，使任意路径都能安全嵌进单引号里。 */
 function shQuote(s: string): string {
@@ -430,6 +430,84 @@ export class AdbClient {
       `if [ ! -e ${shQuote(p)} ] && [ ! -L ${shQuote(p)} ]; then echo '路径不存在'; exit 4; fi; ` +
       `rm -rf ${shQuote(p)}`
     return this.shell(serial, script, 60000)
+  }
+
+  /**
+   * 移动 / 复制一组文件到目标目录。
+   *
+   * 逐个处理（一次 adb shell 一个源）而不是拼成一个大脚本：
+   *   - 每个条目都能拿到自己的退出码和报错，批量里坏一个不影响其余；
+   *   - 不用把 N 个路径拼进同一条命令行，避免长列表撞上命令长度限制。
+   * 代价是 N 次往返（单次约几十毫秒），几十个文件完全够用。
+   *
+   * ★ 覆盖语义是"先删目标再放入"，不是 cp -r 的合并语义
+   *   （cp 遇到同名目录会往里面再套一层，用户看到的和"覆盖"不是一回事）。
+   */
+  async transferPaths(
+    serial: string,
+    mode: 'move' | 'copy',
+    sources: string[],
+    destDir: string,
+    overwrite = false
+  ): Promise<FileTransferResult> {
+    const dest = normalizeRemotePath(destDir)
+    const empty = { okNames: [] as string[], conflicts: [] as string[], failed: [] as { name: string; message: string }[] }
+
+    const qd = shQuote(dest)
+    const chk = await this.shell(
+      serial,
+      `if [ ! -d ${qd} ]; then echo NOTDIR; elif [ ! -w ${qd} ]; then echo NOWRITE; else echo OK; fi`,
+      15000
+    )
+    const tag = (chk.stdout || '').trim()
+    if (tag === 'NOTDIR') return { ok: false, message: `目标不是目录：${dest}`, ...empty }
+    if (tag === 'NOWRITE') return { ok: false, message: `目标目录不可写：${dest}（可能需要 root 或改到 /sdcard 下）`, ...empty }
+
+    for (const raw of sources) {
+      const p = normalizeRemotePath(raw)
+      const name = p.split('/').filter(Boolean).pop() || p
+      const depth = p.split('/').filter(Boolean).length
+
+      // 源路径保护：与删除同一套规则（不许搬存储根 / 系统分区）
+      if (PROTECTED_PATHS.has(p) || depth < 2) {
+        empty.failed.push({ name, message: '受保护路径，已拒绝' })
+        continue
+      }
+      // 源和目标在同一目录：mv 会报 "same file"，cp 更糟（会往自己里面拷，无限递归）
+      if (remoteParent(p) === dest) {
+        empty.failed.push({ name, message: '源和目标在同一个目录' })
+        continue
+      }
+      // 目标在源目录内部：同理，会把自己搬进自己里面
+      if (dest === p || dest.startsWith(p + '/')) {
+        empty.failed.push({ name, message: '目标在源目录内部' })
+        continue
+      }
+
+      const q = shQuote(p)
+      const target = dest === '/' ? `/${name}` : `${dest}/${name}`
+      const qt = shQuote(target)
+      // 退出码约定：3 = 已存在同名（交给 UI 二次确认）、4 = 源不存在、7 = 删不掉旧目标
+      const script =
+        `if [ ! -e ${q} ] && [ ! -L ${q} ]; then echo MISSING; exit 4; fi; ` +
+        (overwrite
+          ? `if [ -e ${qt} ] || [ -L ${qt} ]; then rm -rf ${qt} || exit 7; fi; `
+          : `if [ -e ${qt} ] || [ -L ${qt} ]; then echo EXISTS; exit 3; fi; `) +
+        (mode === 'move' ? `mv -f ${q} ${qd}` : `cp -r -f ${q} ${qd}`)
+
+      // eslint-disable-next-line no-await-in-loop
+      const r = await this.shell(serial, script, 120000)
+      if (r.code === 0) empty.okNames.push(name)
+      else if (r.code === 3) empty.conflicts.push(name)
+      else if (r.code === 4) empty.failed.push({ name, message: '源不存在（可能已被删除或改名）' })
+      else if (r.code === 7) empty.failed.push({ name, message: '目标里的同名项删不掉（权限不足）' })
+      else {
+        const msg = (r.stderr || r.stdout || '').trim() || `退出码 ${r.code}`
+        empty.failed.push({ name, message: msg.replace(/^.*:\s*/, '') })
+      }
+    }
+
+    return { ok: true, ...empty }
   }
 
   /** Capture a binary stream from `exec-out` (e.g. screencap). Returns raw Buffer. */

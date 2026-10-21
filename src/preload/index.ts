@@ -16,6 +16,7 @@ import type {
   AdbShellResult,
   OpResult,
   ListDirResult,
+  FileTransferResult,
   LanScanResult,
   UpdateSnapshot,
   AudioMeta,
@@ -71,6 +72,14 @@ const api = {
   /** 删除设备端文件或目录（目录递归删除；受保护路径由主进程拒绝） */
   deleteRemote: (serial: string, remotePath: string): Promise<OpResult> =>
     ipcRenderer.invoke('device:delete', serial, remotePath),
+  /** 批量移动 / 复制到目标目录（overwrite=false 时同名会进 conflicts，由 UI 二次确认） */
+  transferFiles: (
+    serial: string,
+    mode: 'move' | 'copy',
+    sources: string[],
+    destDir: string,
+    overwrite = false
+  ): Promise<FileTransferResult> => ipcRenderer.invoke('device:transfer', serial, mode, sources, destDir, overwrite),
   /** 下载到用户选择的本地文件夹（文件与目录都适用） */
   pullRemoteTo: (serial: string, remotePath: string): Promise<OpResult> =>
     ipcRenderer.invoke('device:pullTo', serial, remotePath),

@@ -1162,6 +1162,28 @@ export function registerIpc(store: Store): AppManager {
     }
   })
 
+  // 移动 / 复制（批量）：返回逐条结果，UI 负责二次确认覆盖
+  ipcMain.handle(
+    'device:transfer',
+    async (_e, serial: string, mode: 'move' | 'copy', sources: string[], destDir: string, overwrite: boolean) => {
+      try {
+        if (!Array.isArray(sources) || sources.length === 0) {
+          return { ok: false, message: '没有选中任何文件', okNames: [], conflicts: [], failed: [] }
+        }
+        const a = ensureAdb()
+        return await a.transferPaths(serial, mode, sources, destDir, overwrite === true)
+      } catch (err) {
+        return {
+          ok: false,
+          message: err instanceof Error ? err.message : String(err),
+          okNames: [],
+          conflicts: [],
+          failed: []
+        }
+      }
+    }
+  )
+
   // 下载到用户选择的本地文件夹（文件/目录都适用；目录会被整个拉取）
   ipcMain.handle('device:pullTo', async (_e, serial: string, remotePath: string) => {
     try {

@@ -2377,6 +2377,174 @@ body.drawer-resizing {
   color: var(--text-dim);
 }
 
+/* ---- 批量模式：行首多出勾选列（表头与行必须同步加列，否则整行错位）---- */
+.fm-grid.selecting {
+  grid-template-columns: 16px minmax(0, 1fr) 78px 122px 66px;
+}
+
+.fm-check {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.fm-row.checked {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.fm-row.checked:hover {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.fm-batch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+}
+
+.fm-batch-count {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.fm-batch-sep {
+  width: 1px;
+  height: 15px;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* 覆盖确认（目标已有同名项）：用琥珀色，和"删除确认"的红色区分开 */
+.fm-confirm-warn {
+  border-color: color-mix(in srgb, var(--amber) 45%, var(--border));
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+}
+
+/* ---- 目标目录选择器 ---- */
+.fm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.fm-modal {
+  position: fixed;
+  z-index: 61;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 92vw);
+  max-height: 78vh;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.fm-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fm-modal-head > span {
+  flex: 1;
+  min-width: 0;
+}
+
+.fm-modal-path {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.fm-modal-path::-webkit-scrollbar {
+  height: 4px;
+}
+
+.fm-modal-list {
+  flex: 1;
+  min-height: 140px;
+  max-height: 46vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 5px;
+}
+
+.fm-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.fm-pick-row:hover {
+  background: var(--bg-hover);
+}
+
+.fm-pick-row svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.fm-pick-row svg:last-child {
+  color: var(--text-faint);
+}
+
+.fm-modal-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.fm-modal-foot .hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-modal-foot b {
+  font-family: var(--mono);
+}
+
 /* ===== 软件更新（设置页 + 侧栏提示）===== */
 
 /* 侧栏底部提示条：只在发现新版本/已就绪时出现，点它打开设置页的更新区 */
