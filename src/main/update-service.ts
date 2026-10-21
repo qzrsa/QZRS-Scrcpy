@@ -21,10 +21,11 @@ import type { ManifestPatch, UpdateManifest } from './updater-core'
  * ★★ 三条不可动摇的产品约束（对齐「快速启动」的更新模型）：
  *   ① 默认开启自动检查，但**只在启动时检查一次** —— 不轮询、不常驻、不后台盯着。
  *   ② **下载与安装永远等用户点**。检查是全自动的，动手必须是人按的。
- *   ③ 便携版是单文件 exe，运行中无法替换自己 → 直接判"不支持"，并告诉用户去哪下。
+ *   ③ 只发**目录版**（安装版 / 绿色版），两者目录形状相同、都走这条链；
+ *      单文件便携版已停止发布（运行中无法替换自己，自更新对它天然不成立）。
  *
  * ★★ 为什么快照要连"为什么不能更新"一起给出：用户看到"更新不可用"时最需要的是原因
- *   （便携版？清单没发？超时？），而不是一个静默的灰按钮。
+ *   （形态不支持？安装目录不可写？清单没发？超时？），而不是一个静默的灰按钮。
  */
 
 const STATE_TEXT: Record<UpdateStatus, string> = {
@@ -60,6 +61,8 @@ interface St {
   stage: string
   progress: { got: number; total: number } | null
   notice: UpdateNotice | null
+  /** 暂存区可写性（boot 时探一次，之后不会变） */
+  writable: { ok: boolean; reason: string }
 }
 
 export interface UpdateDeps {
@@ -91,7 +94,8 @@ export class UpdateService {
     manifest: null,
     stage: '',
     progress: null,
-    notice: null
+    notice: null,
+    writable: { ok: true, reason: '' }
   }
 
   private seq = 0
@@ -109,6 +113,39 @@ export class UpdateService {
 
   private can(): { ok: boolean; reason: string } {
     return updater.canSelfUpdate(this.deps.form())
+  }
+
+  /**
+   * 探一次"暂存区能不能写"。
+   *
+   * ★★ 为什么必须有这一步：安装版（NSIS）**允许用户自选安装目录**，装到
+   *    `C:\Program Files\...` 时普通权限写不进去。不预检的话，用户点「下载更新」
+   *    会卡在「暂存区创建失败」——一个看不懂的内部错误，看起来就像"更新坏了"。
+   *    预检能把原因说成人话，并且**只关掉安装能力、保留检查能力**（检查是只读的）。
+   * ★ 探针放在 `.update/`（受保护目录）里而不是安装目录根：`scanDir` 会整棵跳过它，
+   *    于是永远不会被当成"程序文件"进清单。
+   */
+  private probeWritable(): { ok: boolean; reason: string } {
+    const dir = this.deps.programDir()
+    try {
+      const stage = updater.ensureStageRoot(dir)
+      const probe = join(stage, '.write-probe')
+      writeFileSync(probe, 'ok')
+      unlinkSync(probe)
+      return { ok: true, reason: '' }
+    } catch (e) {
+      return {
+        ok: false,
+        reason:
+          `程序目录不可写（${(e as Error).message}）。更新要往 ${dir} 里写文件 —— ` +
+          '已装在 Program Files 一类需要管理员权限的目录时无法自更新，' +
+          '请把程序重新安装到「用户目录」或可写的非系统盘（安装时可选目录），或手动下载新版覆盖。'
+      }
+    }
+  }
+
+  private writable(): { ok: boolean; reason: string } {
+    return this.st.writable
   }
 
   /** 归一化后的更新源；设置里填了非法值就返回 {error}，绝不静默回落成默认源 */
@@ -186,6 +223,7 @@ export class UpdateService {
     const s = this.settings()
     const c = this.can()
     const b = this.base()
+    const w = this.writable()
     return {
       supported: !!c.ok,
       unsupportedReason: c.ok ? '' : c.reason,
@@ -194,6 +232,8 @@ export class UpdateService {
       autoUpdate: s.autoUpdate !== false,
       base: b.error ? '' : b.url,
       baseError: b.error,
+      dirWritable: w.ok,
+      dirWritableReason: w.reason,
       status: this.st.status,
       statusText: STATE_TEXT[this.st.status] ?? this.st.status,
       latest: this.st.latest,
@@ -205,8 +245,9 @@ export class UpdateService {
       dir: updater.stageRootOf(this.deps.programDir()),
       busy: this.st.status === 'checking' || this.st.status === 'downloading',
       canCheck: c.ok && this.st.status !== 'checking' && this.st.status !== 'downloading',
-      canDownload: c.ok && this.st.status === 'available',
-      canApply: c.ok && this.st.status === 'staged',
+      // ★ 下载/安装额外要求目录可写；检查不受影响（只读）
+      canDownload: c.ok && w.ok && this.st.status === 'available',
+      canApply: c.ok && w.ok && this.st.status === 'staged',
       notice: this.st.notice
     }
   }
@@ -280,6 +321,9 @@ export class UpdateService {
     if (this.inflight) return this.inflight
     const c = this.can()
     if (!c.ok) return Promise.resolve({ ok: false, reason: c.reason })
+    // 界面上按钮已经灰了，这里是第二道闸（防绕过 / 防状态残留）
+    const w = this.writable()
+    if (!w.ok) return Promise.resolve({ ok: false, reason: w.reason })
     if (!this.st.manifest) return Promise.resolve({ ok: false, reason: '还没有可用清单，请先检查更新' })
     if (this.st.status === 'downloading') return Promise.resolve({ ok: false, reason: '正在下载' })
     if (this.st.status !== 'available') return Promise.resolve({ ok: false, reason: '当前没有待下载的更新' })
@@ -559,10 +603,11 @@ export class UpdateService {
     return { ok: true }
   }
 
-  /** 启动时调一次：判形态 + 恢复/收尾上次的更新结果。**不**发网络请求。 */
+  /** 启动时调一次：判形态 + 探可写性 + 恢复/收尾上次的更新结果。**不**发网络请求。 */
   boot(): { ok: boolean; reason?: string } {
     if (this.booted) return { ok: true }
     this.booted = true
+    this.st.writable = this.probeWritable()
     const c = this.can()
     if (!c.ok) {
       this.set({ status: 'unsupported', reason: c.reason })

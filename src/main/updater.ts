@@ -772,13 +772,23 @@ export async function stageDelta(o: {
 export type RunForm = 'green' | 'portable' | 'dev'
 
 /**
- * 更新只支持目录版（绿色版 / 安装版目录形状完全一样：`QZRS Scrcpy.exe` + `resources/`）。
- * 便携版是**单文件 exe**，运行中无法替换自己 → 直接判"不支持"并告诉用户去哪下。
+ * 更新只支持**目录版**：安装版与绿色版的目录形状完全一样
+ * （`QZRS Scrcpy.exe` + `resources/`），所以两者走同一条更新链。
+ *
+ * ★ 已经把打包目标里的 `portable` 去掉了（2026-10-21，用户要求）：
+ *   单文件 exe 运行中无法替换自己，自更新对它**天然不成立**。留一个永远不能
+ *   更新的形态只会让用户以为"更新坏了"。
+ * ★ 但 `portable` 这个形态判定**必须保留** —— 历史版本发出去的单文件 exe 还在
+ *   用户手上，它读到 `PORTABLE_EXECUTABLE_*` 时要给出"改装安装版/绿色版"的指引，
+ *   而不是静默说"没有更新"。
  */
 export function canSelfUpdate(form: RunForm): { ok: boolean; reason: string } {
   if (form === 'green') return { ok: true, reason: '' }
   if (form === 'portable') {
-    return { ok: false, reason: '便携版是单文件 exe，无法在运行中替换自己 —— 请到 Release 页面下载新版' }
+    return {
+      ok: false,
+      reason: '便携版是单文件 exe，无法在运行中替换自己 —— 请改用安装版或绿色版，它们都支持增量自动更新'
+    }
   }
   return { ok: false, reason: '开发模式不做自更新' }
 }

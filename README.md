@@ -48,12 +48,14 @@ npm run dev
 npm run build
 # 产物在 out/ 目录，可用 electron out/main/index.js 或打包工具运行
 
-# 4. 打包三种产物（输出到 ../release/，含 adb / scrcpy / scrcpy-server）
+# 4. 打包两种产物（输出到 ../release/，含 adb / scrcpy / scrcpy-server）
 npm run dist
 #   安装版   QZRS Scrcpy Setup <version>.exe
-#   便携版   QZRS Scrcpy <version>.exe
 #   绿色版   win-unpacked/（免安装目录）
 ```
+
+> **不再提供便携版**（单文件 exe）。它在运行中无法替换自己，自更新对它天然不成立；
+> 而安装版与绿色版目录结构相同，两者都能走同一套增量自动更新。
 
 ## 在 GitHub 上编译（免本地环境）
 
@@ -62,17 +64,22 @@ npm run dist
 
 | 触发方式 | 行为 |
 |----------|------|
-| push 到 `main` | 自动类型检查 → 编译 → 打包三种产物 → 上传为可下载产物 |
+| push 到 `main` | 自动类型检查 → 编译 → 打包两种产物 → 上传为可下载产物 |
 | **Actions → Build → Run workflow**（手动） | 随时重编；可填「产物名后缀」（如本地序号 `011`） |
 | 打 `v*` 标签（如 `git tag v1.0.0`） | 额外自动创建 GitHub Release 并附上全部产物 |
 
-每次构建产出三种，按需取用：
+每次构建产出两种，按需取用：
 
 | 产物 | 文件名 | 说明 |
 |------|--------|------|
 | **安装版** | `QZRS-Scrcpy-Setup-<编号>.exe` | 标准安装向导，可自选安装目录、自动建桌面/开始菜单快捷方式 |
-| **便携版** | `QZRS-Scrcpy-Portable-<编号>.exe` | 单文件，双击即用，可放 U 盘 |
 | **绿色版** | `QZRS-Scrcpy-Green-<编号>.zip` | 免安装目录，解压即用 |
+
+两者都支持**增量自动更新**（设置 → 软件更新）。另有 `update.json`（更新清单）与
+`QZRS-Scrcpy-Delta-*.bin`（差量包，只在有上一版可作基准时生成），供客户端自动更新使用。
+
+> **便携版（单文件 exe）已停止发布**：运行中无法替换自己，没法自更新。
+> 装在 `Program Files` 等需要管理员权限的目录时也不能自更新 —— 安装时选用户目录或非系统盘即可。
 
 编号沿用本地约定 `QZRS Scrcpy <8位日期><3位序号>`：手动触发时可自己填序号与本地对齐，
 否则用 GitHub 的 run number 自动补零。
@@ -80,7 +87,7 @@ npm run dist
 **拿到产物**：进入 `Actions` → 点开对应那次 run → 页面底部 `Artifacts` 里下载
 `QZRS-Scrcpy-<编号>`，解压后即可使用（adb / scrcpy / scrcpy-server 均已随包附带，无需另装）。
 
-打 `v*` 标签时，三个产物也会出现在仓库的 **Releases** 页面，可直接下载。
+打 `v*` 标签时，两种产物也会出现在仓库的 **Releases** 页面，可直接下载。
 
 > 注①：绿色版 zip 解压后 `QZRS Scrcpy.exe` 直接在当前目录（压缩包是扁平结构），
 > 建议先新建一个文件夹再解压。

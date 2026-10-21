@@ -277,6 +277,17 @@ export interface UpdateSnapshot {
   autoUpdate: boolean
   base: string
   baseError: string
+  /**
+   * 程序目录（其实是 `安装目录/.update` 暂存区）能不能写。
+   *
+   * ★ 为什么单独一个字段而不是并进 `supported`：
+   *   安装版的 NSIS 允许用户自选目录，装到 `C:\Program Files\...` 时普通权限写不进去，
+   *   而"检查更新"是纯只读、完全能用的。把两件事混成一个布尔值会让用户连查都查不了。
+   *   所以：`supported=false` → 形态不支持（便携版/开发模式）；
+   *        `dirWritable=false` → 能查、不能装，并说清为什么。
+   */
+  dirWritable: boolean
+  dirWritableReason: string
   status: UpdateStatus
   statusText: string
   latest: string

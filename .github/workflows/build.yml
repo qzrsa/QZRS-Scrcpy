@@ -1,7 +1,7 @@
 name: Build
 
 # 触发方式：
-#   1. push 到 main        → 自动编译 + 出三种产物（安装版 / 便携版 / 绿色版）
+#   1. push 到 main        → 自动编译 + 出两种产物（安装版 / 绿色版）
 #   2. 手动 Run workflow   → 想重编随时点一下（可指定版本号后缀，例如本地序号 011）
 #   3. 打 v* tag           → 额外把产物发布到 GitHub Release
 on:
@@ -30,7 +30,7 @@ env:
 
 jobs:
   build-windows:
-    # 必须 Windows runner：产物只有 win 目标（nsis/portable/dir），
+    # 必须 Windows runner：产物只有 win 目标（nsis/dir），
     # 且 extraResources 里全是 .exe/.dll（adb/scrcpy）。
     runs-on: windows-latest
     timeout-minutes: 60
@@ -80,15 +80,21 @@ jobs:
       - name: 编译（electron-vite build）
         run: npm run build
 
-      # 出三种产物：
-      #   nsis     → 安装版（标准向导，可选安装目录、建桌面/开始菜单快捷方式）
-      #   portable → 便携版（单文件 exe，双击即用，可拷 U 盘）
-      #   dir      → 绿色版（免安装目录，解压就用）——即 win-unpacked
+      # 出两种产物（**不再出便携版**，原因见下）：
+      #   nsis → 安装版（标准向导，可选安装目录、建桌面/开始菜单快捷方式）
+      #   dir  → 绿色版（免安装目录，解压就用）——即 win-unpacked
+      #
+      # ★ 为什么砍掉便携版（portable / 单文件 exe）：
+      #   便携版是**单文件** exe，运行中无法替换自己 → 自更新对它天然不成立，
+      #   而安装版与绿色版的目录形状完全一样（`QZRS Scrcpy.exe` + `resources/`），
+      #   两者都能走同一套「下载 → 摊暂存区 → 退出后助手替换」的增量升级。
+      #   留一个永远不能自更新的形态只会让用户以为"更新坏了"。
+      #
       # 版本号：手动传的 label 优先，否则用 run number（3 位补零）。
       # ⚠️ 产物名不在 package.json 里用 ${env.BUILD_TAG} 拼 —— electron-builder 遇到
       #    未定义的环境变量会直接报错（cannot expand pattern: env BUILD_TAG is not defined），
       #    那样本地 `npm run dist` 就废了。所以这里打包完**手动改名**。
-      - name: 打包（安装版 + 便携版 + 绿色版）
+      - name: 打包（安装版 + 绿色版）
         shell: bash
         run: |
           set -euo pipefail
@@ -102,12 +108,11 @@ jobs:
           APP_VER=$(node -p "require('./package.json').version")
           GREEN="QZRS Scrcpy ${BUILD_TAG}"
           SETUP="QZRS-Scrcpy-Setup-${BUILD_TAG}.exe"
-          PORTABLE="QZRS-Scrcpy-Portable-${BUILD_TAG}.exe"
           # ⚠️ zip 名必须带连字符、不含空格：GitHub 上传 Release 资产时会把它自己
           #    "normalize" —— 空格会被替换成点（实测 QZRS Scrcpy 20260930008.zip
           #    变成了 QZRS.Scrcpy.20260930008.zip），而 action-gh-release 官方文档写明
           #    "the final download name remains GitHub-controlled"，没有 # 之类的改名语法，
-          #    治不了。所以从源头就不带空格，同时与 SETUP / PORTABLE 风格统一。
+          #    治不了。所以从源头就不带空格，同时与 SETUP 风格统一。
           GREEN_ZIP="QZRS-Scrcpy-Green-${BUILD_TAG}.zip"
           echo "版本号 ${APP_VER} / 编号 ${BUILD_TAG}"
 
@@ -117,7 +122,7 @@ jobs:
           #      ⨯ GitHub Personal Access Token is not set, neither programmatically,
           #        nor using env "GH_TOKEN"
           #    产物上传/发布由下面的 upload-artifact 与 action-gh-release 负责。
-          npx electron-builder --win nsis portable dir --x64 --publish never
+          npx electron-builder --win nsis dir --x64 --publish never
 
           cd ../release
           # ⚠️ 必须转成原生 Windows 绝对路径（且不带 ..）给后面的 action 用：
@@ -141,7 +146,6 @@ jobs:
 
           # 改名为带日期的约定名
           mv "QZRS Scrcpy Setup ${APP_VER}.exe"      "$SETUP"
-          mv "QZRS Scrcpy ${APP_VER}.exe"            "$PORTABLE"
           if [ -d win-unpacked ]; then
             mv win-unpacked "$GREEN"
           fi
@@ -158,19 +162,18 @@ jobs:
             echo "GREEN=${GREEN}"
             echo "GREEN_ZIP=${GREEN_ZIP}"
             echo "SETUP=${SETUP}"
-            echo "PORTABLE=${PORTABLE}"
             echo "RELEASE_DIR=${RELEASE_DIR}"
           } >> "$GITHUB_ENV"
 
-      # 冒烟校验：三个产物一个都不能少（打包配置漏项在本地踩过坑）
+      # 冒烟校验：两种产物一个都不能少（打包配置漏项在本地踩过坑）
       - name: 校验产物完整性
         shell: bash
         run: |
           set -euo pipefail
           cd ../release
 
-          # 1) 安装版 + 便携版 exe
-          for f in "${SETUP}" "${PORTABLE}"; do
+          # 1) 安装版 exe
+          for f in "${SETUP}"; do
             test -f "$f" || { echo "::error::缺少产物：${f}"; ls -la; exit 1; }
             echo "✓ ${f}  $(( $(stat -c%s "$f") / 1048576 )) MB"
           done
@@ -235,7 +238,7 @@ jobs:
           echo "PREV_VER=${PREV_VER}" >> "$GITHUB_ENV"
 
       # 自更新清单：客户端（设置 → 软件更新）靠它判断"有没有新版本、要下哪个包"。
-      # 与三个产物同属一个 Release，默认更新源是
+      # 与两种产物同属一个 Release，默认更新源是
       #   https://github.com/<owner>/<repo>/releases/latest/download/update.json
       # ★ 必须放在打 zip **之后**：清单里要有 zip 的 sha256，否则全量回退无从校验。
       # ★ 脚本自带硬校验（目录完整性 / 顶层不许有运行时目录），不过就直接失败退出。
@@ -266,7 +269,6 @@ jobs:
           # （upload-artifact@v4 / @actions/glob 见到 '..' 直接断言失败，见打包步骤注释）
           path: |
             ${{ env.RELEASE_DIR }}\${{ env.SETUP }}
-            ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
             ${{ env.RELEASE_DIR }}\${{ env.GREEN_ZIP }}
             ${{ env.RELEASE_DIR }}\update.json
             ${{ env.RELEASE_DIR }}\QZRS-Scrcpy-Delta-*.bin
@@ -282,7 +284,6 @@ jobs:
           # update.json 必须一起发：客户端用 releases/latest/download/update.json 判断更新
           files: |
             ${{ env.RELEASE_DIR }}\${{ env.SETUP }}
-            ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
             ${{ env.RELEASE_DIR }}\${{ env.GREEN_ZIP }}
             ${{ env.RELEASE_DIR }}\update.json
             ${{ env.RELEASE_DIR }}\QZRS-Scrcpy-Delta-*.bin
@@ -301,10 +302,9 @@ jobs:
           ls -la
           echo "::endgroup::"
           echo "SETUP=${SETUP}"
-          echo "PORTABLE=${PORTABLE}"
           echo "GREEN=${GREEN}"
           echo "GREEN_ZIP=${GREEN_ZIP}"
-          for f in "${SETUP}" "${PORTABLE}" "${GREEN_ZIP}"; do
+          for f in "${SETUP}" "${GREEN_ZIP}"; do
             if [ -f "$f" ]; then
               echo "OK   $f  $(( $(stat -c%s "$f") / 1048576 )) MB"
             else
@@ -318,7 +318,6 @@ jobs:
         run: |
           cd ../release
           setup_mb=$(( $(stat -c%s "${SETUP}") / 1048576 ))
-          port_mb=$(( $(stat -c%s "${PORTABLE}") / 1048576 ))
           zip_mb=$(( $(stat -c%s "${GREEN_ZIP}") / 1048576 ))
           # 差量包可能没有（首个版本 / 拿不到上一版）→ 用 || true 兜住，别让摘要步骤挂掉
           DELTA_TEXT=$(node -e "
@@ -334,9 +333,8 @@ jobs:
             echo ""
             echo "| 产物 | 文件 | 大小 | 说明 |"
             echo "| --- | --- | --- | --- |"
-            echo "| 安装版 | \`${SETUP}\` | ${setup_mb} MB | 标准向导安装，可自选目录、建快捷方式 |"
-            echo "| 便携版 | \`${PORTABLE}\` | ${port_mb} MB | 单文件，双击即用，可放 U 盘 |"
-            echo "| 绿色版 | \`${GREEN_ZIP}\` | ${zip_mb} MB | 免安装目录，解压即用 |"
+            echo "| 安装版 | \`${SETUP}\` | ${setup_mb} MB | 标准向导安装，可自选目录、建快捷方式；**支持增量自动更新** |"
+            echo "| 绿色版 | \`${GREEN_ZIP}\` | ${zip_mb} MB | 免安装目录，解压即用；**同样支持增量自动更新** |"
             echo "| 更新清单 | \`update.json\` | $(stat -c%s update.json) B | 客户端「设置 → 软件更新」用 |"
             echo "| 差量包 | ${DELTA_TEXT} | — | 只下变了的块；对不上自动退回全量 |"
             echo ""

@@ -208,10 +208,16 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         </div>
 
         {/* 状态原因要显式给出来：用户看到"更新不可用"时最需要的是原因
-            （便携版？清单没发？超时？），而不是一个静默的灰按钮 */}
+            （形态不支持？清单没发？超时？），而不是一个静默的灰按钮 */}
         {upd && !upd.supported && (
           <div className="hint" style={{ marginTop: -2 }}>
             {upd.unsupportedReason}
+          </div>
+        )}
+        {/* 形态支持但目录不可写：还能查、不能装。原因单独显示，别和"形态不支持"混成一句 */}
+        {upd?.supported && !upd.dirWritable && (
+          <div className="hint" style={{ marginTop: -2, color: 'var(--red, #e74c3c)' }}>
+            {upd.dirWritableReason}
           </div>
         )}
         {upd?.supported && upd.reason && (
@@ -280,6 +286,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         </div>
 
         <div className="hint">
+          <b>安装版与绿色版都支持</b>自动更新（两者目录结构相同）；单文件便携版已停止发布
+          —— 它在运行中无法替换自己，本来就没法自更新。
+          <br />
           启动时只<b>检查</b>一次（不轮询、不后台常驻），发现新版本会在左侧栏提示；
           <b>下载与安装永远等你点</b>，不会偷偷替换文件。
           <br />
@@ -288,6 +297,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
           <br />
           更新只替换程序文件，<b>按键方案 / 脚本 / 日志 / OCR 模型</b>（安装目录下的
           <code>keymaps</code>、<code>scripts</code>、<code>logs</code>、<code>ocr-models</code>）一律不碰。
+          <br />
+          装到 <code>Program Files</code> 这类需要管理员权限的目录时无法自更新（写不进去），
+          安装时选「用户目录」或非系统盘即可。
           <br />
           更新源填镜像或代理时应指向"一次 Release 的资产目录"，例如
           <code style={{ userSelect: 'all' }}>https://ghproxy.example/https://github.com/qzrsa/QZRS-Scrcpy/releases/latest/download</code>
