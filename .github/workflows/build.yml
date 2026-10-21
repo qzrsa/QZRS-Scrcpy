@@ -201,6 +201,22 @@ jobs:
           Set-Location ../release
           & "$root/.github/scripts/generate-green-zip.ps1" -DirName $env:GREEN -ZipName $env:GREEN_ZIP
 
+      # 自更新清单：客户端（设置 → 软件更新）靠它判断"有没有新版本、要下哪个包"。
+      # 与三个产物同属一个 Release，默认更新源是
+      #   https://github.com/<owner>/<repo>/releases/latest/download/update.json
+      # ★ 必须放在打 zip **之后**：清单里要有 zip 的 sha256，否则全量回退无从校验。
+      # ★ 脚本自带硬校验（目录完整性 / 顶层不许有运行时目录），不过就直接失败退出。
+      - name: 生成更新清单 update.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/make-update-manifest.mjs \
+            --new "../release/${GREEN}" \
+            --zip "../release/${GREEN_ZIP}" \
+            --out "../release"
+          test -f "../release/update.json" || { echo "::error::update.json 没有生成"; exit 1; }
+          node -e "const m=require('../release/update.json');console.log('清单版本',m.version,'文件',m.files.length,'全量',m.full.asset)"
+
       - name: 上传产物（Actions 页面可下载）
         uses: actions/upload-artifact@v4
         with:
@@ -211,6 +227,7 @@ jobs:
             ${{ env.RELEASE_DIR }}\${{ env.SETUP }}
             ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
             ${{ env.RELEASE_DIR }}\${{ env.GREEN_ZIP }}
+            ${{ env.RELEASE_DIR }}\update.json
           if-no-files-found: error
           retention-days: 30
 
@@ -220,10 +237,12 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           name: QZRS Scrcpy ${{ env.BUILD_TAG }}
+          # update.json 必须一起发：客户端用 releases/latest/download/update.json 判断更新
           files: |
             ${{ env.RELEASE_DIR }}\${{ env.SETUP }}
             ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
             ${{ env.RELEASE_DIR }}\${{ env.GREEN_ZIP }}
+            ${{ env.RELEASE_DIR }}\update.json
           generate_release_notes: true
           draft: false
           prerelease: false
@@ -268,6 +287,7 @@ jobs:
             echo "| 安装版 | \`${SETUP}\` | ${setup_mb} MB | 标准向导安装，可自选目录、建快捷方式 |"
             echo "| 便携版 | \`${PORTABLE}\` | ${port_mb} MB | 单文件，双击即用，可放 U 盘 |"
             echo "| 绿色版 | \`${GREEN_ZIP}\` | ${zip_mb} MB | 免安装目录，解压即用 |"
+            echo "| 更新清单 | \`update.json\` | $(stat -c%s update.json) B | 客户端「设置 → 软件更新」用 |"
             echo ""
             echo "下载：**Actions → 本次 run → Artifacts → QZRS-Scrcpy-${BUILD_TAG}**"
           } >> "$GITHUB_STEP_SUMMARY"

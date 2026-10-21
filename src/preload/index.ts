@@ -17,6 +17,7 @@ import type {
   OpResult,
   ListDirResult,
   LanScanResult,
+  UpdateSnapshot,
   AudioMeta,
   AudioFrameEvent
 } from '@shared/types'
@@ -175,6 +176,24 @@ const api = {
     const l = (_e: unknown, d: { phase: 'downloading' | 'verifying' | 'done' | 'error'; percent: number; file?: string; filePercent?: number; message?: string }): void => cb(d)
     ipcRenderer.on('ocr:progress', l)
     return () => ipcRenderer.removeListener('ocr:progress', l)
+  },
+
+  /** ---- 自更新（软件更新）---- */
+  /** 当前更新状态快照（渲染层只读这份，不自己拼状态） */
+  getUpdateState: (): Promise<UpdateSnapshot> => ipcRenderer.invoke('update:state'),
+  /** 手动查一次更新（启动时的静默检查由主进程自己触发） */
+  checkUpdate: (): Promise<{ ok: boolean; available?: boolean; reason?: string }> =>
+    ipcRenderer.invoke('update:check'),
+  /** 下载并摊进暂存区（不覆盖任何正在运行的文件） */
+  downloadUpdate: (): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('update:download'),
+  /** 重启并更新：交接给退出后运行的助手，随后本进程退出 */
+  applyUpdate: (): Promise<{ ok: boolean; reason?: string }> => ipcRenderer.invoke('update:apply'),
+  /** 打开更新目录（含 apply.log，更新失败时看原因） */
+  openUpdateDir: (): Promise<OpResult & { dir?: string }> => ipcRenderer.invoke('update:openDir'),
+  onUpdateState: (cb: (s: UpdateSnapshot) => void): (() => void) => {
+    const l = (_e: unknown, d: UpdateSnapshot): void => cb(d)
+    ipcRenderer.on('update:state', l)
+    return () => ipcRenderer.removeListener('update:state', l)
   },
 
   onDevicesChanged: (cb: (devices: DeviceInfo[]) => void): (() => void) => {

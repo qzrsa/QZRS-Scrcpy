@@ -64,10 +64,21 @@ function createWindow(theme: 'dark' | 'light' | 'system'): void {
 
 app.whenReady().then(() => {
   const store = new Store()
-  manager = registerIpc(store)
+  const mgr = registerIpc(store)
+  manager = mgr
 
   const settings = store.getSettings()
   createWindow(settings.theme)
+
+  // ---- 自更新：启动时收尾上次的结果，并（默认）静默查一次 ----
+  // ★ 只检查、不下载：发现新版本只在侧栏/设置页提示，**下载与安装永远等用户点**。
+  // ★ 等 4 秒再查：不跟首屏渲染、设备枚举抢带宽；也让"上次更新成功/失败"的提示先出来。
+  mgr.update.boot()
+  if (settings.autoUpdate !== false) {
+    setTimeout(() => {
+      void mgr.update.check({ silent: true })
+    }, 4000)
+  }
 
   // 'system' 主题下操作系统切换深浅色时，同步窗口底色
   nativeTheme.on('updated', () => {

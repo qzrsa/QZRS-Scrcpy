@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { AppSettings, VideoCodec, DecoderAcceleration } from '@shared/types'
+import type { AppSettings, VideoCodec, DecoderAcceleration, UpdateSnapshot } from '@shared/types'
 import {
   MAX_EXTRA_ADDRESSES,
   countRanges,
@@ -23,6 +23,25 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
   // OCR 模型状态 + 下载进度
   const [ocr, setOcr] = useState<Awaited<ReturnType<typeof window.api.getOcrStatus>> | null>(null)
   const [ocrProgress, setOcrProgress] = useState<{ phase: 'downloading' | 'verifying' | 'done' | 'error'; percent: number; file?: string; filePercent?: number; message?: string } | null>(null)
+  // 自更新状态（主进程快照，渲染层只读）
+  const [upd, setUpd] = useState<UpdateSnapshot | null>(null)
+  const [updErr, setUpdErr] = useState('')
+
+  useEffect(() => {
+    void window.api.getUpdateState().then(setUpd).catch(() => undefined)
+    return window.api.onUpdateState(setUpd)
+  }, [])
+
+  /** 更新动作的统一入口：失败原因直接显示在按钮下方，不弹窗打断 */
+  const runUpdate = async (fn: () => Promise<{ ok: boolean; reason?: string }>): Promise<void> => {
+    setUpdErr('')
+    try {
+      const r = await fn()
+      if (!r.ok && r.reason) setUpdErr(r.reason)
+    } catch (e) {
+      setUpdErr(e instanceof Error ? e.message : String(e))
+    }
+  }
 
   const extra = useMemo(() => parseSubnets(extraText), [extraText])
   const extraInvalid = extra.errors.length > 0 || extra.overLimit
@@ -171,6 +190,85 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
           <option value="light">浅色</option>
           <option value="system">跟随系统</option>
         </select>
+      </div>
+
+      {/*
+        软件更新：与「快速启动」同一套模型 ——
+          ① 启动时静默查一次（可关）；
+          ② 发现新版本只提示，**下载与安装永远等用户点**；
+          ③ 下载只摊进暂存区，重启后由"退出后助手"统一替换（Windows 上运行中的 exe 不可覆盖）。
+        这里的状态全部来自主进程快照，渲染层不自己推断，避免出现两份真相。
+      */}
+      <div className="field">
+        <label>软件更新</label>
+        <div className="upd-head">
+          <span className="upd-ver">v{upd?.myVersion || '…'}</span>
+          <span className={`upd-status ${upd?.status || 'idle'}`}>{upd?.statusText || '…'}</span>
+          {upd?.checkedAtText && <span className="upd-when">上次检查 {upd.checkedAtText}</span>}
+        </div>
+
+        {upd?.progress && (
+          <div className="upd-bar" role="progressbar" aria-valuenow={upd.progress.pct ?? 0} aria-valuemin={0} aria-valuemax={100}>
+            <div className="upd-bar-fill" style={{ width: `${upd.progress.pct ?? 0}%` }} />
+            <span className="upd-bar-text">{upd.progress.text}</span>
+          </div>
+        )}
+
+        <div className="upd-actions">
+          <button
+            className="btn"
+            disabled={!upd?.canCheck}
+            onClick={() => void runUpdate(() => window.api.checkUpdate())}
+          >
+            {upd?.busy ? '请稍候…' : '检查更新'}
+          </button>
+          {upd?.canDownload && (
+            <button className="btn btn-primary" onClick={() => void runUpdate(() => window.api.downloadUpdate())}>
+              下载更新{upd.plan ? `（${upd.plan.sizeText}）` : ''}
+            </button>
+          )}
+          {upd?.canApply && (
+            <button className="btn btn-primary" onClick={() => void runUpdate(() => window.api.applyUpdate())}>
+              重启并更新
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={() => void window.api.openUpdateDir()}>
+            更新目录
+          </button>
+        </div>
+
+        {updErr && (
+          <div className="hint" style={{ color: 'var(--red, #e74c3c)' }}>
+            {updErr}
+          </div>
+        )}
+
+        <div className="upd-row">
+          <span>启动时自动检查更新</span>
+          <Toggle checked={draft.autoUpdate !== false} onChange={(v) => patch({ autoUpdate: v })} />
+        </div>
+
+        <div className="field" style={{ marginTop: 10, marginBottom: 0 }}>
+          <label>更新源（可留空）</label>
+          <input
+            className="text-input"
+            value={draft.updateBase}
+            placeholder="留空 = GitHub releases/latest/download"
+            onChange={(e) => patch({ updateBase: e.target.value })}
+          />
+        </div>
+
+        <div className="hint">
+          启动时只<b>检查</b>一次（不轮询、不后台常驻），发现新版本会在左侧栏提示；
+          <b>下载与安装永远等你点</b>，不会偷偷替换文件。
+          <br />
+          更新只替换程序文件，<b>按键方案 / 脚本 / 日志 / OCR 模型</b>（安装目录下的
+          <code>keymaps</code>、<code>scripts</code>、<code>logs</code>、<code>ocr-models</code>）一律不碰。
+          <br />
+          更新源填镜像或代理时应指向"一次 Release 的资产目录"，例如
+          <code style={{ userSelect: 'all' }}>https://ghproxy.example/https://github.com/qzrsa/QZRS-Scrcpy/releases/latest/download</code>
+          。改了更新源需先<b>保存设置</b>，下一次检查才生效。
+        </div>
       </div>
 
       <div className="field">

@@ -13,6 +13,8 @@ import { ScriptEngine } from './scriptengine'
 import { PyScriptManager } from './pyscripts'
 import { PythonBridge, BridgeHttpError } from './bridge'
 import { writeBridgeClients } from './bridgeclients'
+import { UpdateService } from './update-service'
+import { detectForm } from './updater'
 import { OcrModelDownloader, type OcrProgress } from './ocrdownload'
 import { ocrStatus as ocrModelsStatus, OCR_MANUAL_URL, resolveOcrModelDir } from './ocrmodels'
 import { bgraToRgba, matchTemplate, toGray } from './templatematch'
@@ -34,6 +36,8 @@ import type {
 } from '@shared/types'
 
 export interface AppManager {
+  /** 自更新服务（启动时的静默检查由 index.ts 触发；IPC 面板直接用它） */
+  update: UpdateService
   dispose(): Promise<void>
 }
 
@@ -95,6 +99,23 @@ export function registerIpc(store: Store): AppManager {
   function log(line: string): void {
     send('log', line)
   }
+
+  /**
+   * 自更新服务。
+   * ★ 形态判定：打包后且没有 PORTABLE_EXECUTABLE_DIR → 目录版（绿色版/安装版目录形状相同）。
+   *   便携版是单文件 exe，运行中无法替换自己，直接判"不支持"。
+   * ★ programDir 用 exe 所在目录（不是 resourcesPath 的上一级也无所谓，两者等价）。
+   */
+  const updateService = new UpdateService({
+    version: () => app.getVersion(),
+    form: () => detectForm(app.isPackaged, process.env),
+    programDir: () => (app.isPackaged ? dirname(app.getPath('exe')) : app.getAppPath()),
+    exePath: () => app.getPath('exe'),
+    getSettings: () => store.getSettings(),
+    patchSettings: (patch) => store.setSettings({ ...store.getSettings(), ...patch }),
+    send,
+    quit: () => app.quit()
+  })
 
   // ---- device polling ----
   /**
@@ -773,6 +794,19 @@ export function registerIpc(store: Store): AppManager {
       return { adbPath: findAdb(store.getSettings().adbPath) ?? '', serverPath: findServer(store.getSettings().serverPath) ?? '' }
     }
   })
+  // ---- 自更新（软件更新）----
+  // 状态是主进程的一份快照，渲染层只读不拼：checking/available/downloading/staged 的
+  // 语义都在 update-service 里，界面上任何一处自己推断都会出现两份真相。
+  ipcMain.handle('update:state', () => updateService.snapshot())
+  ipcMain.handle('update:check', () => updateService.check())
+  ipcMain.handle('update:download', () => updateService.download())
+  ipcMain.handle('update:apply', () => updateService.applyAndRestart())
+  ipcMain.handle('update:openDir', async () => {
+    const dir = updateService.ensureDir()
+    const err = await shell.openPath(dir)
+    return err ? { ok: false, message: err, dir } : { ok: true, dir }
+  })
+
   ipcMain.handle('keymaps:get', () => store.getKeymaps())
   ipcMain.handle('keymaps:set', (_e, k: KeymapConfig[]) => store.setKeymaps(k))
 
@@ -1186,6 +1220,7 @@ export function registerIpc(store: Store): AppManager {
   log('应用已启动')
 
   return {
+    update: updateService,
     async dispose() {
       debugLogger.flushSync()
       scriptEngine.stopAll() // 停掉所有运行中的脚本（等价于抬起手指，防止退出后虚拟手指悬挂）

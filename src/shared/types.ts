@@ -221,6 +221,78 @@ export interface AppSettings {
   bridgePort: number
   /** Python 解释器（脚本面板运行 scripts/python/*.py 用）；空串 = 用 PATH 里的 python */
   pythonPath: string
+  /**
+   * 启动时自动检查一次更新（默认开）。
+   * ★ 只检查、不下载：发现新版本只在侧栏/设置页提示，**下载与安装永远等用户点**。
+   */
+  autoUpdate: boolean
+  /**
+   * 更新源基址。空串 = 默认 GitHub 的 `releases/latest/download`。
+   * 国内直连 GitHub 资产常常断流，允许换成镜像/代理（必须 http(s):// 开头）。
+   */
+  updateBase: string
+  /**
+   * 上一次更新结果的去重键（`applied|1.4.0|<时间>`）。
+   * 用于"成功/失败提示只报一次"，跨重启也不会重复弹。
+   */
+  lastUpdateNotice: string
+}
+
+/** 自更新状态（与主进程 update-service 的状态机一一对应） */
+export type UpdateStatus =
+  | 'unsupported' // 便携版 / 开发模式
+  | 'idle' // 还没查过
+  | 'checking'
+  | 'uptodate'
+  | 'available' // 有新版本，等用户点「下载」
+  | 'downloading'
+  | 'staged' // 已下载校验完，等用户点「重启并更新」
+  | 'nothing' // 下下来了，但本机逐字节已与目标一致
+  | 'failed'
+
+export interface UpdateProgress {
+  got: number
+  total: number
+  /** 0~100；总大小未知时为 null */
+  pct: number | null
+  /** 形如 `12.3 MiB / 130.5 MiB（9%）` */
+  text: string
+}
+
+/** 启动时一次性提示（更新成功 / 上次更新失败） */
+export interface UpdateNotice {
+  kind: 'applied' | 'failed'
+  title: string
+  text: string
+  key: string
+}
+
+/** 自更新快照：渲染层只认这一份，不自己拼状态 */
+export interface UpdateSnapshot {
+  supported: boolean
+  unsupportedReason: string
+  /** green = 目录版（含安装版，两者目录形状相同）；portable = 单文件；dev = 开发模式 */
+  form: 'green' | 'portable' | 'dev'
+  myVersion: string
+  autoUpdate: boolean
+  base: string
+  baseError: string
+  status: UpdateStatus
+  statusText: string
+  latest: string
+  /** 状态说明（为什么不可用 / 为什么走全量 / 失败原因） */
+  reason: string
+  plan: { mode: 'full'; size: number; sizeText: string } | null
+  progress: UpdateProgress | null
+  checkedAt: number
+  checkedAtText: string
+  /** 更新目录（含 apply.json / apply.log / 暂存区） */
+  dir: string
+  busy: boolean
+  canCheck: boolean
+  canDownload: boolean
+  canApply: boolean
+  notice: UpdateNotice | null
 }
 
 /**

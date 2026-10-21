@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ControlCommand, KeymapConfig, SessionStats, AppSettings } from '@shared/types'
+import type { ControlCommand, KeymapConfig, SessionStats, AppSettings, UpdateSnapshot } from '@shared/types'
 import { useApp } from './store'
 import { DeviceSidebar } from './components/DeviceSidebar'
 import { MirrorView } from './components/MirrorView'
@@ -39,9 +39,33 @@ export default function App(): JSX.Element {
   const [recordedCode, setRecordedCode] = useState<string | null>(null)
   const [netStats, setNetStats] = useState<SessionStats | null>(null)
   const [renderStats, setRenderStats] = useState<{ renderFps: number; hardware: boolean } | null>(null)
+  // ---- 自更新：主进程推快照，渲染层只读（不自己拼状态）----
+  const [updateSnap, setUpdateSnap] = useState<UpdateSnapshot | null>(null)
+
+  useEffect(() => {
+    void window.api.getUpdateState().then(setUpdateSnap).catch(() => undefined)
+    return window.api.onUpdateState(setUpdateSnap)
+  }, [])
+
+  // 上次更新结果只报一次：主进程用 settings.lastUpdateNotice 去重，跨重启也不会重复弹
+  const noticeKeyRef = useRef('')
+  useEffect(() => {
+    const n = updateSnap?.notice
+    if (!n || noticeKeyRef.current === n.key) return
+    noticeKeyRef.current = n.key
+    setToast({ msg: `${n.title}：${n.text}`, type: n.kind === 'applied' ? 'success' : 'error' })
+  }, [updateSnap])
 
   const activeSession = sessions.find((s) => s.serial === activeSerial) ?? null
   const activeTransport = devices.find((d) => d.serial === activeSession?.serial)?.transport ?? null
+
+  // 侧栏更新提示：只在"有新版本" / "已下好待重启"时出现，其余状态不打扰
+  const updateHint =
+    updateSnap?.status === 'available'
+      ? `发现新版本 v${updateSnap.latest}`
+      : updateSnap?.status === 'staged'
+        ? `v${updateSnap.latest} 已就绪，重启更新`
+        : null
 
   const showToast = useCallback((msg: string, type: Toast['type'] = 'info') => setToast({ msg, type }), [])
 
@@ -271,6 +295,7 @@ export default function App(): JSX.Element {
         onSelect={handleSelect}
         onOpenConnect={() => setConnectOpen(true)}
         onOpenSettings={() => setPanel('settings')}
+        updateHint={updateHint}
       />
 
       <main className="main">

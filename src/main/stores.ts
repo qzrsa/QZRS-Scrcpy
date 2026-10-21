@@ -30,6 +30,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   bridgeEnabled: false,
   bridgePort: 17399,
   pythonPath: '',
+  // 启动时自动检查一次更新（只检查、不下载；下载与安装永远等用户点）
+  autoUpdate: true,
+  // 空串 = 默认 GitHub releases/latest/download；填了就走镜像/代理
+  updateBase: '',
+  // 上一次更新结果的去重键（'' = 还没报过）
+  lastUpdateNotice: '',
   session: {
     bitRate: 8000000,
     maxFps: 0,
