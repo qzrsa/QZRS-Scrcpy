@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   DeviceInfo,
   SessionOptions,
@@ -52,6 +52,16 @@ const api = {
     ipcRenderer.invoke('device:shell', serial, command),
   pushFile: (serial: string, localPath: string, remotePath: string): Promise<OpResult> =>
     ipcRenderer.invoke('device:push', serial, localPath, remotePath),
+  /**
+   * 把「拖进窗口的 File 对象」解析成本地绝对路径（拖拽上传用）。
+   *
+   * ⚠️ Electron 32 起 `File.path` 已被移除，旧写法拿到 undefined，只能走 webUtils。
+   * 这个函数必须定义在 preload：contextBridge 支持把 File 对象递过来，而渲染层
+   * 在 contextIsolation 下拿不到 electron 模块。
+   * 参数类型用 Parameters<…> 而不是裸的 File —— preload 的 tsconfig 没有加载 DOM lib。
+   */
+  getPathForFile: (file: unknown): string =>
+    webUtils.getPathForFile(file as Parameters<typeof webUtils.getPathForFile>[0]),
   pullFile: (serial: string, remotePath: string): Promise<OpResult> =>
     ipcRenderer.invoke('device:pull', serial, remotePath),
   /** ---- 设备文件管理器 ---- */

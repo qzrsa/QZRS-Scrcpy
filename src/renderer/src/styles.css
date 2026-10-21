@@ -519,6 +519,43 @@ textarea {
   z-index: 100;
 }
 
+/* 拖文件悬停在投屏区时的落点提示。
+   pointer-events:none 是必须的：浮层盖在 stage 上，能接事件的话 dragleave/drop 会被它吃掉。 */
+.stage-drop {
+  position: absolute;
+  inset: 10px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  pointer-events: none;
+  animation: fadeIn 0.12s ease;
+}
+
+.stage-drop-card {
+  padding: 16px 22px;
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.stage-drop-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.stage-drop-sub {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+}
+
 .mirror-wrap {
   position: relative;
   display: flex;

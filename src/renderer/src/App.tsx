@@ -12,6 +12,7 @@ import { ScriptPanel } from './components/ScriptPanel'
 import { ClipboardDialog } from './components/ClipboardDialog'
 import { StatsOverlay } from './components/StatsOverlay'
 import { IconPhone, IconFullscreen } from './components/icons'
+import { useStageFileDrop, DROP_TARGET } from './filedrop'
 
 type Panel = 'settings' | 'keymap' | 'tools' | 'script'
 
@@ -67,6 +68,9 @@ export default function App(): JSX.Element {
         : null
 
   const showToast = useCallback((msg: string, type: Toast['type'] = 'info') => setToast({ msg, type }), [])
+
+  // 拖文件到投屏区 → adb push 到设备（官方 scrcpy 也是这个交互）
+  const drop = useStageFileDrop({ serial: activeSession?.serial ?? null, onToast: showToast })
 
   // theme
   useEffect(() => {
@@ -320,7 +324,7 @@ export default function App(): JSX.Element {
           onStop={() => void handleStop()}
         />
 
-        <div className="stage">
+        <div className={`stage ${drop.dragging ? 'drop-active' : ''}`} {...drop.handlers}>
           {activeSession ? (
           <MirrorView
             session={activeSession}
@@ -360,6 +364,18 @@ export default function App(): JSX.Element {
               <button className="btn btn-danger btn-sm" onClick={stopScriptRecord}>
                 停止并生成
               </button>
+            </div>
+          )}
+
+          {/* 拖文件进来的落点提示。pointer-events:none 让它不挡住真正的 drop 事件 */}
+          {drop.dragging && (
+            <div className="stage-drop">
+              <div className="stage-drop-card">
+                <div className="stage-drop-title">{activeSession ? '松手传到手机' : '当前没有连接的设备'}</div>
+                <div className="stage-drop-sub">
+                  {activeSession ? `文件会放进设备的 ${DROP_TARGET}` : '先开始投屏，再拖文件进来'}
+                </div>
+              </div>
             </div>
           )}
         </div>
