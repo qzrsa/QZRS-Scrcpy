@@ -190,7 +190,15 @@ export interface AppSettings {
   /** fullscreen mode: 'overlay' = CSS overlay (sidebar+toolbar hidden, window stays);
    *  'window' = system-level fullscreen (requestFullscreen) or maximize via IPC. */
   fullscreenMode: 'overlay' | 'window'
-  /** 调试模式开启时是否把调试日志写入安装目录/logs/<日期>.log（默认关） */
+  /**
+   * 在画面上叠加「按键调试日志」（最近 6 条按键/触控命中记录，默认关）。
+   *
+   * 以前是工具栏上一个独立的「D」按钮，但那排查时才用一次、平时一直是关的开关，
+   * 占着工具栏一格不划算 —— 挪进设置当一个选项。
+   * 它同时是 `debugLogToFile` 的总闸：本项关着时一个字都不会写文件。
+   */
+  debugLog: boolean
+  /** 上面那条调试日志是否**再**追加写入 安装目录/logs/<日期>.log（默认关） */
   debugLogToFile: boolean
   /**
    * 画面是否随窗口大小自适应缩放（默认开）。

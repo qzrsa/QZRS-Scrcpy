@@ -17,7 +17,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   groupControl: false,
   activeKeymapId: null,
   fullscreenMode: 'overlay' as const,
-  /** 调试模式开启时是否把调试日志写入安装目录/logs/<日期>.log（默认关） */
+  // 按键调试日志（画面叠加最近 6 条按键/触控记录）。原先是工具栏的「D」按钮，
+  // 挪进设置当选项；默认关，只在排查按键映射时开一下。
+  debugLog: false,
+  /** 调试日志是否再写入安装目录/logs/<日期>.log（默认关；需 debugLog 先开） */
   debugLogToFile: false,
   // 画面随窗口自适应缩放（等比，不拉伸），窗口模式和全屏都生效。默认开：
   // 不开的时候回到原来的行为——窗口模式画布以解码缓冲尺寸为基准（只能压小，窗口拖大画面不动），

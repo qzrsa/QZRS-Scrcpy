@@ -575,12 +575,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
       </div>
 
       <div className="field row between">
+        <label style={{ margin: 0 }}>显示按键调试日志</label>
+        <Toggle checked={draft.debugLog === true} onChange={(v) => patch({ debugLog: v })} />
+      </div>
+      <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+        在画面左下角叠加最近 6 条按键 / 触控记录（命中了哪条映射、发到哪个坐标），
+        <b>排查按键映射对不上时</b>打开看一眼即可，平时关着不占画面。
+        <br />
+        以前这是工具栏上的「D」按钮，现在挪到这里；<b>保存设置后生效</b>。
+      </div>
+
+      <div className="field row between">
         <label style={{ margin: 0 }}>调试时写入日志文件</label>
         <Toggle checked={draft.debugLogToFile} onChange={(v) => patch({ debugLogToFile: v })} />
       </div>
       {draft.debugLogToFile && (
         <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-          打开调试模式（工具栏「D」开关）后，触控坐标/按键映射日志会追加写入：
+          打开上面「显示按键调试日志」后，触控坐标/按键映射日志会<b>再</b>追加写入：
           <br />
           <code style={{ userSelect: 'all' }}>{logDir || '…'}\&lt;日期&gt;.log</code>
         </div>

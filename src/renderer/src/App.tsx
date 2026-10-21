@@ -25,7 +25,6 @@ export default function App(): JSX.Element {
   const [activeSerial, setActiveSerial] = useState<string | null>(null)
   const [panel, setPanel] = useState<Panel | null>(null)
   const [keymapEditing, setKeymapEditing] = useState(false)
-  const [debugOverlay, setDebugOverlay] = useState(false)
   const [connectOpen, setConnectOpen] = useState(false)
   const [clipboardOpen, setClipboardOpen] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
@@ -306,7 +305,6 @@ export default function App(): JSX.Element {
           fullscreen={fullscreen}
           infoActive={statsOpen}
           keymapEditing={keymapEditing}
-          debugActive={debugOverlay}
           send={send}
           onToggleGroupControl={toggleGroupControl}
           onToggleFullscreen={() => setFullscreen((f) => !f)}
@@ -319,7 +317,6 @@ export default function App(): JSX.Element {
           onOpenTools={() => setPanel('tools')}
           onOpenScript={() => setPanel('script')}
           onOpenSettings={() => setPanel('settings')}
-          onToggleDebug={() => setDebugOverlay((v) => !v)}
           onStop={() => void handleStop()}
         />
 
@@ -334,7 +331,8 @@ export default function App(): JSX.Element {
             autoFit={settings.mirrorAutoFit !== false}
             keymap={activeKeymap}
             editing={keymapEditing}
-            debug={debugOverlay}
+            // 按键调试日志：设置项（原先工具栏的「D」按钮），保存后生效
+            debug={settings.debugLog === true}
             fileLog={settings.debugLogToFile}
             recording={scriptRecording}
             onRecordGesture={handleRecordGesture}
