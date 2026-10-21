@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import type { AppSettings, UpdateNotice, UpdateProgress, UpdateSnapshot, UpdateStatus } from '@shared/types'
 import * as applyLib from './updater-apply'
 import * as updater from './updater'
-import { humanBytes, isNewer } from './updater-core'
-import type { UpdateManifest } from './updater-core'
+import { humanBytes, isNewer, deltaWorthIt, pickPatch } from './updater-core'
+import type { ManifestPatch, UpdateManifest } from './updater-core'
 
 /**
  * 自更新的**编排层**：把「检查 → 下载 → 摊进暂存区 → 交接给退出后助手」串成一条状态机，
@@ -136,10 +136,36 @@ export class UpdateService {
 
   /* ---------------------------------------------------------- 界面快照 */
 
+  /** 按"我正在跑的版本"挑一条差量；挑不到 / 不划算就报全量 */
+  private patch(): ManifestPatch | null {
+    const p = pickPatch(this.st.manifest, this.deps.version())
+    if (!p) return null
+    return deltaWorthIt(p, Number(this.st.manifest?.full?.size) || 0) ? p : null
+  }
+
   private planInfo(): UpdateSnapshot['plan'] {
     if (!this.st.manifest) return null
-    const size = Number(this.st.manifest.full?.size) || 0
-    return { mode: 'full', size, sizeText: humanBytes(size) }
+    const fullSize = Number(this.st.manifest.full?.size) || 0
+    const p = this.patch()
+    if (p) {
+      const size = Number(p.size) || 0
+      return {
+        mode: 'delta',
+        size,
+        sizeText: humanBytes(size),
+        fullSize,
+        fullSizeText: humanBytes(fullSize),
+        from: p.from
+      }
+    }
+    return {
+      mode: 'full',
+      size: fullSize,
+      sizeText: humanBytes(fullSize),
+      fullSize,
+      fullSizeText: humanBytes(fullSize),
+      from: ''
+    }
   }
 
   private progressInfo(): UpdateProgress | null {
@@ -269,35 +295,65 @@ export class UpdateService {
 
       const my = ++this.seq
       const m = this.st.manifest!
-      const size = Number(m.full?.size) || 0
-      this.set({ status: 'downloading', reason: '', progress: size ? { got: 0, total: size } : null })
+      const fullSize = Number(m.full?.size) || 0
+      const patch = this.patch()
+      // 差量包和全量包大小差一个量级，"进度总量"必须跟着当前这条通道走
+      let expect = patch ? Number(patch.size) || 0 : fullSize
+      this.set({ status: 'downloading', reason: '', progress: expect ? { got: 0, total: expect } : null })
 
       let lastPush = 0
       const onChunk = (got: number, total: number): void => {
-        this.st.progress = { got, total: Number(total) || size || 0 }
+        this.st.progress = { got, total: Number(total) || expect || 0 }
         const t = this.now()
         if (t - lastPush < PROGRESS_THROTTLE_MS) return
         lastPush = t
         this.push()
       }
 
-      let r: updater.StageResult
-      try {
-        r = await updater.stageFull({
-          manifest: m,
-          base: b.url,
-          programDir: this.deps.programDir(),
-          myVersion: this.deps.version(),
-          exePath: this.deps.exePath(),
-          restart: true,
-          onChunk
-        })
-      } catch (e) {
-        r = { ok: false, reason: '下载失败：' + (e as Error).message }
+      const ctx = {
+        manifest: m,
+        base: b.url,
+        programDir: this.deps.programDir(),
+        myVersion: this.deps.version(),
+        exePath: this.deps.exePath(),
+        restart: true,
+        onChunk
+      }
+
+      let r: updater.StageResult | null = null
+      /** 差量失败的原因。非空 = 已经退回全量，界面要能解释"为什么下了全量" */
+      let fallback = ''
+
+      if (patch) {
+        try {
+          r = await updater.stageDelta({ ...ctx, patch })
+        } catch (e) {
+          r = { ok: false, reason: (e as Error).message }
+        }
+        if (!r.ok) {
+          // ★★ 差量只是"省流量"的优化，它失败**绝不能**让更新失败。
+          //    退回全量是静默的（用户只看到下载大一点），但原因要留下来 ——
+          //    否则排障时看不出"为什么这次下了 152 MB 而不是 20 MB"。
+          fallback = r.reason ?? '差量不可用'
+          expect = fullSize
+          this.st.progress = fullSize ? { got: 0, total: fullSize } : null
+          this.push()
+          r = null
+        }
+      }
+
+      if (!r) {
+        try {
+          r = await updater.stageFull(ctx)
+        } catch (e) {
+          r = { ok: false, reason: '下载失败：' + (e as Error).message }
+        }
       }
 
       if (my !== this.seq) return { ok: false, reason: '结果已过期（期间有更新的操作）' }
-      if (!r.ok) return fail(r.reason ?? '下载失败')
+      if (!r.ok) {
+        return fail(fallback ? `差量失败（${fallback}），退回全量后仍失败：${r.reason ?? '未知原因'}` : (r.reason ?? '下载失败'))
+      }
       if (r.nothingToDo) {
         this.set({
           status: 'nothing',
@@ -308,12 +364,17 @@ export class UpdateService {
         })
         return { ok: true }
       }
+
+      const how = patch && !fallback
+        ? `差量 ${humanBytes(Number(patch.size) || 0)}（全量 ${humanBytes(fullSize)}）`
+        : `全量 ${humanBytes(fullSize)}`
+      const why = fallback ? `。差量不可用，已改下全量：${fallback}` : ''
       this.set({
         status: 'staged',
         latest: m.version,
         progress: null,
         stage: r.stage ?? '',
-        reason: `已下载并校验 v${m.version}（全量），重启即完成`
+        reason: `已下载并校验 v${m.version}（${how}）${why}，重启即完成`
       })
       return { ok: true }
     })().finally(() => {

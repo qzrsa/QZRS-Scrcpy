@@ -235,6 +235,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
           >
             {upd?.busy ? '请稍候…' : '检查更新'}
           </button>
+          {upd?.canDownload && upd.plan?.mode === 'delta' && (
+            <span
+              className="upd-when"
+              title={`差量基准 v${upd.plan.from}；换机 / 改过程序文件时会自动退回全量`}
+            >
+              差量 · 省 {(upd.plan.fullSize / Math.max(upd.plan.size, 1)).toFixed(1)}×
+            </span>
+          )}
           {upd?.canDownload && (
             <button className="btn btn-primary" onClick={() => void runUpdate(() => window.api.downloadUpdate())}>
               下载更新{upd.plan ? `（${upd.plan.sizeText}）` : ''}
@@ -274,6 +282,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
         <div className="hint">
           启动时只<b>检查</b>一次（不轮询、不后台常驻），发现新版本会在左侧栏提示；
           <b>下载与安装永远等你点</b>，不会偷偷替换文件。
+          <br />
+          下载优先走<b>差量</b>（只下和当前版本不同的数据块，常见能省 80% 以上流量）；
+          差量基准对不上（换过机器、手动改过程序文件）时自动退回全量整包，<b>不会因此更新失败</b>。
           <br />
           更新只替换程序文件，<b>按键方案 / 脚本 / 日志 / OCR 模型</b>（安装目录下的
           <code>keymaps</code>、<code>scripts</code>、<code>logs</code>、<code>ocr-models</code>）一律不碰。

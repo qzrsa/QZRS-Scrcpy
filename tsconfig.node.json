@@ -10,6 +10,10 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
+    /* vcdiff.mjs / zipread.mjs：与发布工具（tools/*.mjs，纯 Node ESM）共用的唯一实现。
+       不编译 TS 意味着 CI 里跑不起来，所以只能用 .mjs —— 这里开 allowJs 让 TS 直接读它们，
+       类型由文件里的 JSDoc 提供（不额外维护 .d.ts，避免又一处会漂移的定义）。 */
+    "allowJs": true,
     "paths": {
       "@shared/*": ["./src/shared/*"]
     },

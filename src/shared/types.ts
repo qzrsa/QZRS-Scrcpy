@@ -282,7 +282,20 @@ export interface UpdateSnapshot {
   latest: string
   /** 状态说明（为什么不可用 / 为什么走全量 / 失败原因） */
   reason: string
-  plan: { mode: 'full'; size: number; sizeText: string } | null
+  /**
+   * 本次更新会下多少东西。`delta` = 有可用差量包且划算（只下变了的块）；
+   * `full` = 下绿色版整包。两种都最终摊进同一个暂存区，对用户的意义只差"流量"。
+   */
+  plan: {
+    mode: 'full' | 'delta'
+    size: number
+    sizeText: string
+    /** 全量包的字节数（差量模式下用来对比"省了多少"） */
+    fullSize: number
+    fullSizeText: string
+    /** 差量的基准版本（mode==='delta' 时等于当前运行的版本） */
+    from: string
+  } | null
   progress: UpdateProgress | null
   checkedAt: number
   checkedAtText: string

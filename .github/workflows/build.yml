@@ -201,21 +201,62 @@ jobs:
           Set-Location ../release
           & "$root/.github/scripts/generate-green-zip.ps1" -DirName $env:GREEN -ZipName $env:GREEN_ZIP
 
+      # 差量包的基准 = 上一版 Release 的绿色版 zip。
+      # ★ 此刻本次还没发布，所以 releases/latest 一定指向"上一个已发布版本"。
+      # ★ 拿不到就**跳过差量**，绝不因此失败：差量只是省流量，全量永远是兜底。
+      # ★ 首个带 update.json 的版本必然拿不到（上一版没有清单），这是预期的。
+      - name: 准备差量基准（上一版）
+        shell: bash
+        run: |
+          set -uo pipefail
+          cd ../release
+          REPO_URL="https://github.com/${{ github.repository }}/releases/latest/download"
+          if ! curl -fsSL --retry 2 -m 60 "$REPO_URL/update.json" -o prev-update.json; then
+            echo "::warning::拿不到上一版 update.json（可能是首个带清单的版本）→ 本次只出全量"
+            exit 0
+          fi
+          PREV_VER=$(node -p "require('./prev-update.json').version" 2>/dev/null || true)
+          PREV_ASSET=$(node -p "require('./prev-update.json').full.asset" 2>/dev/null || true)
+          if [ -z "${PREV_VER:-}" ] || [ -z "${PREV_ASSET:-}" ]; then
+            echo "::warning::上一版清单不完整（version=${PREV_VER:-?} asset=${PREV_ASSET:-?}）→ 本次只出全量"
+            exit 0
+          fi
+          if [ "$PREV_VER" = "${APP_VER}" ]; then
+            echo "::warning::上一版与本次版本相同（${APP_VER}）→ 不做差量"
+            exit 0
+          fi
+          echo "上一版 ${PREV_VER} / ${PREV_ASSET}"
+          if ! curl -fSL --retry 3 -m 1800 "$REPO_URL/$PREV_ASSET" -o prev.zip; then
+            echo "::warning::上一版 zip 下载失败 → 本次只出全量"
+            exit 0
+          fi
+          echo "已下上一版 zip $(stat -c%s prev.zip) B"
+          echo "PREV_ZIP=$(cygpath -w -a "$(pwd)/prev.zip")" >> "$GITHUB_ENV"
+          echo "PREV_VER=${PREV_VER}" >> "$GITHUB_ENV"
+
       # 自更新清单：客户端（设置 → 软件更新）靠它判断"有没有新版本、要下哪个包"。
       # 与三个产物同属一个 Release，默认更新源是
       #   https://github.com/<owner>/<repo>/releases/latest/download/update.json
       # ★ 必须放在打 zip **之后**：清单里要有 zip 的 sha256，否则全量回退无从校验。
       # ★ 脚本自带硬校验（目录完整性 / 顶层不许有运行时目录），不过就直接失败退出。
-      - name: 生成更新清单 update.json
+      # ★ 有上一版就顺带出一个差量包（块级，只装真正变了的字节）；差量失败只 warn。
+      - name: 生成更新清单 update.json（含差量包）
         shell: bash
         run: |
           set -euo pipefail
+          EXTRA=()
+          if [ -n "${PREV_ZIP:-}" ] && [ -n "${PREV_VER:-}" ]; then
+            EXTRA=(--old-zip "$PREV_ZIP" --from "$PREV_VER")
+          fi
           node tools/make-update-manifest.mjs \
             --new "../release/${GREEN}" \
             --zip "../release/${GREEN_ZIP}" \
-            --out "../release"
+            --out "../release" \
+            "${EXTRA[@]}"
           test -f "../release/update.json" || { echo "::error::update.json 没有生成"; exit 1; }
-          node -e "const m=require('../release/update.json');console.log('清单版本',m.version,'文件',m.files.length,'全量',m.full.asset)"
+          # 顺手清掉差量基准（几百 MB，不参与发布）
+          rm -f ../release/prev.zip ../release/prev-update.json || true
+          node -e "const m=require('../release/update.json');console.log('清单版本',m.version,'文件',m.files.length,'全量',m.full.asset,'差量',(m.patches||[]).map(p=>p.asset).join(',')||'无')"
 
       - name: 上传产物（Actions 页面可下载）
         uses: actions/upload-artifact@v4
@@ -228,6 +269,7 @@ jobs:
             ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
             ${{ env.RELEASE_DIR }}\${{ env.GREEN_ZIP }}
             ${{ env.RELEASE_DIR }}\update.json
+            ${{ env.RELEASE_DIR }}\QZRS-Scrcpy-Delta-*.bin
           if-no-files-found: error
           retention-days: 30
 
@@ -243,6 +285,7 @@ jobs:
             ${{ env.RELEASE_DIR }}\${{ env.PORTABLE }}
             ${{ env.RELEASE_DIR }}\${{ env.GREEN_ZIP }}
             ${{ env.RELEASE_DIR }}\update.json
+            ${{ env.RELEASE_DIR }}\QZRS-Scrcpy-Delta-*.bin
           generate_release_notes: true
           draft: false
           prerelease: false
@@ -277,6 +320,13 @@ jobs:
           setup_mb=$(( $(stat -c%s "${SETUP}") / 1048576 ))
           port_mb=$(( $(stat -c%s "${PORTABLE}") / 1048576 ))
           zip_mb=$(( $(stat -c%s "${GREEN_ZIP}") / 1048576 ))
+          # 差量包可能没有（首个版本 / 拿不到上一版）→ 用 || true 兜住，别让摘要步骤挂掉
+          DELTA_TEXT=$(node -e "
+            const m = require('./update.json');
+            const ps = m.patches || [];
+            if (!ps.length) { console.log('无（客户端下全量）'); process.exit(0); }
+            console.log(ps.map(p => p.asset + ' ｜ ' + (p.size/1048576).toFixed(1) + ' MB（全量的 ' + Math.round(p.ratio*100) + '%）').join('<br>'));
+          " 2>/dev/null || echo '无（客户端下全量）')
           {
             echo "## QZRS Scrcpy 构建完成"
             echo ""
@@ -288,6 +338,7 @@ jobs:
             echo "| 便携版 | \`${PORTABLE}\` | ${port_mb} MB | 单文件，双击即用，可放 U 盘 |"
             echo "| 绿色版 | \`${GREEN_ZIP}\` | ${zip_mb} MB | 免安装目录，解压即用 |"
             echo "| 更新清单 | \`update.json\` | $(stat -c%s update.json) B | 客户端「设置 → 软件更新」用 |"
+            echo "| 差量包 | ${DELTA_TEXT} | — | 只下变了的块；对不上自动退回全量 |"
             echo ""
             echo "下载：**Actions → 本次 run → Artifacts → QZRS-Scrcpy-${BUILD_TAG}**"
           } >> "$GITHUB_STEP_SUMMARY"

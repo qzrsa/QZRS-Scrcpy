@@ -17,8 +17,21 @@ import {
 import { get as nodeHttpGet } from 'node:http'
 import { get as nodeHttpsGet } from 'node:https'
 import { dirname, join } from 'node:path'
-import { PROTECTED_TOP, isNewer, isProtectedPath, validManifest, verifyDir, type ManifestFile, type UpdateManifest } from './updater-core'
-import { readZip } from './zipread'
+import {
+  removalList,
+  PROTECTED_TOP,
+  isNewer,
+  isProtectedPath,
+  validManifest,
+  verifyDir,
+  type ManifestFile,
+  type ManifestPatch,
+  type UpdateManifest
+} from './updater-core'
+// ★ .mjs 而不是 .ts：这份代码发布工具（tools/make-update-manifest.mjs，CI 里直接跑）
+//   也要用。生成端与应用端**共用一份实现**，才不会有"补丁生成器和补丁应用者对不上"。
+import { readZip } from './zipread.mjs'
+import { applyDirPatch } from './vcdiff.mjs'
 
 /* ------------------------------------------------------------------ 常量 */
 
@@ -411,7 +424,8 @@ export interface ApplyPlan {
   stageDir: string
   exe: string
   restart: boolean
-  mode: 'full'
+  /** 'delta' = 由块级差量还原来的；'full' = 由绿色版 zip 解出来的。仅用于展示/排障 */
+  mode: 'full' | 'delta'
   protectedTop: string[]
   writes: { path: string; size: number; sha256: string }[]
   deletes: string[]
@@ -420,7 +434,7 @@ export interface ApplyPlan {
 /**
  * ★ 唯一写 apply.json / state.json 的地方。
  *   受保护路径的最后一道闸也在这里，所以不可能有哪条路绕过去
- *   （stageFull 前面还会先挡一次，避免白写几百 MB 再拒绝）。
+ *   （stageFull / stageDelta 前面还会先挡一次，避免白写几百 MB 再拒绝）。
  */
 function writeApply(o: {
   programDir: string
@@ -428,6 +442,7 @@ function writeApply(o: {
   myVersion: string
   version: string
   stage: string
+  mode: 'full' | 'delta'
   writes: ManifestFile[]
   deletes: string[]
   restart: boolean
@@ -444,7 +459,7 @@ function writeApply(o: {
     stageDir: o.stage,
     exe: o.exePath,
     restart: o.restart,
-    mode: 'full',
+    mode: o.mode,
     // ★ 助手会拿这份名单**再挡一次**（纵深防御）。名单来自 updater-core，
     //   不是在这里另写一份，所以不会漂移。
     protectedTop: PROTECTED_TOP.slice(),
@@ -576,8 +591,178 @@ export async function stageFull(o: {
     myVersion: o.myVersion,
     version: m.version,
     stage: stageRoot,
+    mode: 'full',
     writes,
     deletes: [],
+    restart: o.restart
+  })
+}
+
+/* ------------------------------------------------------------------ 差量 */
+
+/**
+ * 按相对路径惰性读本机文件，带一个可释放的缓存。
+ *
+ * ★ 为什么"惰性 + 可释放"而不是一次性把程序目录读进 Map：
+ *   整个目录 355 MB，全读进来光是驻留内存就把 Electron 主进程的语义搞坏了
+ *   （用户机器上可能同时在投屏/解码）。而差量只需要**被 COPY 引用到的那几个**文件。
+ * ★ `release` 由 applyDirPatch 在每个目标文件还原完之后调用 —— 峰值只跟
+ *   "一个目标文件 + 它的源"有关，与目录总量无关。
+ */
+function fileStore(programDir: string): {
+  get: (rel: string) => Buffer | null
+  release: (rel: string) => void
+} {
+  const cache = new Map<string, Buffer>()
+  return {
+    get(rel: string): Buffer | null {
+      const hit = cache.get(rel)
+      if (hit) return hit
+      let buf: Buffer
+      try {
+        buf = withoutAsar(() => readFileSync(join(programDir, ...rel.split('/'))))
+      } catch {
+        return null
+      }
+      cache.set(rel, buf)
+      return buf
+    },
+    release(rel: string): void {
+      cache.delete(rel)
+    }
+  }
+}
+
+/**
+ * 验基准：本机文件必须**逐个**与差量清单里的 olds 对上。
+ *
+ * ★ 用流式哈希（`sha256File`）而不是读进内存：这一步要把 42 个文件全读一遍，
+ *   读进内存就是 355 MB。而差量清单本身是"上一版 Release 的文件列表"，
+ *   用户手上只要有一个文件被动过（自己改了、被杀软改了、上次更新只走到一半），
+ *   这一版差量就不能用 —— 必须老老实实报错让上层退回全量。
+ */
+function verifyOlds(programDir: string, olds: ManifestFile[]): { ok: boolean; reason?: string } {
+  for (const o of olds) {
+    if (isProtectedPath(o.path)) return { ok: false, reason: '差量清单涉及受保护路径：' + o.path }
+    const abs = join(programDir, ...o.path.split('/'))
+    let st
+    try {
+      st = withoutAsar(() => statSync(abs))
+    } catch {
+      return { ok: false, reason: '本机缺少差量基准文件：' + o.path }
+    }
+    if (st.size !== o.size) return { ok: false, reason: `差量基准文件大小不符：${o.path}` }
+    if (sha256File(abs) !== o.sha256) return { ok: false, reason: `差量基准文件已被改动：${o.path}` }
+  }
+  return { ok: true }
+}
+
+/**
+ * 差量路径：下补丁包 → 用本机旧文件 + 补丁包还原出目标文件 → 摊进暂存区。
+ *
+ * ★ 全程"要么全成要么全不成"：补丁包校验、基准校验、逐文件还原校验任何一步不过，
+ *   都会把暂存区整个删掉再返回失败 —— 上层据此退回全量，用户看到的是"下载久一点"，
+ *   而不是"更新成功但程序打不开"。
+ * ★ 内存：pack 本身（正常几十 MB）+ 逐个还原的目标文件（最大那个 180 MB 的 exe）。
+ *   用 onFile 边还原边写盘，不把 243 MB 攒在数组里。
+ */
+export async function stageDelta(o: {
+  manifest: UpdateManifest
+  patch: ManifestPatch
+  base: string
+  programDir: string
+  myVersion: string
+  exePath: string
+  restart: boolean
+  onChunk?: (got: number, total: number) => void
+}): Promise<StageResult> {
+  const m = o.manifest
+  const p = o.patch
+  const stageRoot = stageDirOf(o.programDir, m.version)
+  const filesRoot = join(stageRoot, 'files')
+
+  try {
+    mkdirSync(stageRoot, { recursive: true })
+  } catch (e) {
+    return { ok: false, reason: '暂存区创建失败：' + (e as Error).message }
+  }
+
+  // 1. 基准校验放在下载**之前**：对不上就没必要浪费用户几十 MB 流量
+  const vb = verifyOlds(o.programDir, p.plan.olds)
+  if (!vb.ok) {
+    dropStage(stageRoot)
+    return { ok: false, reason: vb.reason }
+  }
+
+  // 2. 下补丁包（落在暂存区里 —— 那里是受保护目录，不会被当成程序文件）
+  const packPath = join(stageRoot, p.asset)
+  const dl = await downloadAsset({
+    base: o.base,
+    asset: p.asset,
+    size: p.size,
+    sha256: p.sha256,
+    dest: packPath,
+    onChunk: o.onChunk
+  })
+  if (!dl.ok) {
+    dropStage(stageRoot)
+    return { ok: false, reason: dl.reason }
+  }
+
+  // 3. 还原 → 逐文件直接写进暂存区
+  const writes: ManifestFile[] = []
+  try {
+    const pack = readFileSync(packPath)
+    applyDirPatch(fileStore(o.programDir), p.plan, pack, {
+      // 基准已经用流式哈希验过了，这里不必再把 355 MB 全读进内存重算一遍
+      skipOldVerify: true,
+      onFile: (rel: string, data: Buffer): void => {
+        if (isProtectedPath(rel)) throw new Error('差量还原出现受保护路径：' + rel)
+        const dest = join(filesRoot, ...rel.split('/'))
+        mkdirSync(dirname(dest), { recursive: true })
+        withoutAsar(() => writeFileSync(dest, data))
+        writes.push({ path: rel, size: data.length, sha256: sha256hex(data) })
+      }
+    })
+  } catch (e) {
+    dropStage(stageRoot)
+    return { ok: false, reason: '还原差量失败：' + (e as Error).message }
+  }
+  try {
+    unlinkSync(packPath)
+  } catch {
+    /* 删不掉不影响（它在受保护目录里） */
+  }
+
+  // 4. 落盘的副本再核一次大小（还原时已逐文件验过 sha256；这一步只抓"写到一半"）
+  for (const w of writes) {
+    let size = -1
+    try {
+      size = withoutAsar(() => statSync(join(filesRoot, ...w.path.split('/')))).size
+    } catch {
+      /* 下面统一报错 */
+    }
+    if (size !== w.size) {
+      dropStage(stageRoot)
+      return { ok: false, reason: `暂存文件写入不完整：${w.path}（${size} != ${w.size}）` }
+    }
+  }
+
+  const deletes = removalList(p)
+  if (!writes.length && !deletes.length) {
+    dropStage(stageRoot)
+    return { ok: true, nothingToDo: true, reason: '本机文件已与目标版本逐字节一致，无需替换' }
+  }
+
+  return writeApply({
+    programDir: o.programDir,
+    exePath: o.exePath,
+    myVersion: o.myVersion,
+    version: m.version,
+    stage: stageRoot,
+    mode: 'delta',
+    writes,
+    deletes,
     restart: o.restart
   })
 }

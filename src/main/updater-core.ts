@@ -24,8 +24,116 @@ export interface UpdateManifest {
   full: { asset: string; size: number; sha256: string }
   /** 目标版本的权威文件清单（解包后逐文件校验） */
   files: ManifestFile[]
+  /**
+   * 可选：相对**某个旧版本**的差量包（一个旧版本一条）。
+   * 客户端按自己正在跑的版本去挑；挑不到 / 校验不过 / 不划算就走全量。
+   * ★ 差量失败**绝不能**让更新失败 —— 它只是"省流量"的优化，全量永远是兜底。
+   */
+  patches?: ManifestPatch[]
   /** Release 说明（可选，展示用） */
   notes?: string
+}
+
+/* ---------------------------------------------------------------- 差量 */
+
+/**
+ * 差量指令：统一 4 元组，**长度恒在 index 3**。
+ *   `[0, oldIdx, start, len]` 从旧文件列表第 oldIdx 个文件的 start 处拷 len 字节
+ *   `[1, packOffset, 0, len]` 从补丁包 packOffset 处取 len 字节
+ * （定义与 `vcdiff.mjs` 的 makeDirPatch 一一对应；那边是唯一实现，这里只是类型）
+ */
+export type DeltaOp = [number, number, number, number]
+
+export interface DeltaPlanFile extends ManifestFile {
+  action: 'same' | 'patch'
+  /** action==='patch' 时才有 */
+  ops?: DeltaOp[] | number[][]
+}
+
+/** 生成端（`vcdiff.mjs` 的 makeDirPatch）产出的差量清单，内联进 update.json */
+export interface DeltaPlan {
+  version: number
+  /** 基准版本（旧）的文件列表；客户端要逐个核对本机字节 */
+  olds: ManifestFile[]
+  /** 目标版本的文件列表（action==='same' 的不需要写盘） */
+  files: DeltaPlanFile[]
+  /** 新版本已经没有的文件（来自旧版本清单，用户自己放的文件永远不会进来） */
+  removed: string[]
+  pack: { size: number; sha256: string }
+}
+
+export interface ManifestPatch {
+  /** 基准版本号：必须等于客户端正在跑的版本才用 */
+  from: string
+  /** 补丁包资产名（.bin） */
+  asset: string
+  size: number
+  sha256: string
+  /** 生成时算出的"差量/全量"比例（仅展示） */
+  ratio?: number
+  plan: DeltaPlan
+}
+
+/**
+ * 走差量的门槛：补丁包不得超过全量包的 60%。
+ *
+ * ★ 判据是**占比**而不是"文件大不大"：实测里 180 MB 的 exe 两版之间只差
+ *   VERSIONINFO 里几个字节，块级差量能把它压到几十 KiB。反过来，如果一次改动
+ *   把 app.asar 大半都换了，差量包可能比全量还大 —— 那种情况老实下全量更省。
+ */
+export const DELTA_LIMIT = 0.6
+
+function isManifestFile(f: unknown): f is ManifestFile {
+  const o = f as ManifestFile
+  return !!o && typeof o.path === 'string' && !!o.path && typeof o.sha256 === 'string' && !!o.sha256
+}
+
+function validPatch(p: unknown): p is ManifestPatch {
+  const o = p as ManifestPatch
+  if (!o || typeof o !== 'object') return false
+  if (typeof o.from !== 'string' || !o.from) return false
+  if (typeof o.asset !== 'string' || !o.asset) return false
+  if (typeof o.sha256 !== 'string' || !o.sha256) return false
+  if (typeof o.size !== 'number' || !(o.size >= 0)) return false
+  const pl = o.plan as DeltaPlan | undefined
+  if (!pl || typeof pl !== 'object' || pl.version !== 1) return false
+  if (!Array.isArray(pl.olds) || !pl.olds.every(isManifestFile)) return false
+  if (!Array.isArray(pl.files) || !pl.files.every(isManifestFile)) return false
+  if (!pl.pack || typeof pl.pack.sha256 !== 'string' || !pl.pack.sha256) return false
+  for (const f of pl.files) {
+    if (f.action === 'patch' && !Array.isArray(f.ops)) return false
+  }
+  if (pl.removed !== undefined && !Array.isArray(pl.removed)) return false
+  return true
+}
+
+/** 按"我正在跑的版本"挑一条差量。挑不到返回 null（→ 走全量） */
+export function pickPatch(m: UpdateManifest | null, from: string): ManifestPatch | null {
+  if (!m || !Array.isArray(m.patches) || !from) return null
+  return m.patches.find((p) => p.from === from) ?? null
+}
+
+/**
+ * 差量值不值得走。除了占比门槛，还挡掉"省不到 1 MiB"的边角情况 ——
+ * 那种情况多一次下载 + 一次还原，只会多一个出错的机会。
+ */
+export function deltaWorthIt(p: ManifestPatch | null, fullSize: number, limit = DELTA_LIMIT): boolean {
+  if (!p) return false
+  const pack = Number(p.size) || 0
+  const full = Number(fullSize) || 0
+  if (!(full > 0) || !(pack > 0)) return false
+  if (full - pack < 1048576) return false
+  return pack / full <= limit
+}
+
+/**
+ * 差量路径要删掉的文件（新版本已经没有的那些）。
+ * ★ 这里**故意不过滤**受保护路径：让 writeApply 撞上它并整轮中止，
+ *   比悄悄少删一个文件更能暴露"清单被污染了"。
+ */
+export function removalList(p: ManifestPatch): string[] {
+  const r = p?.plan?.removed
+  return Array.isArray(r) ? r.slice() : []
 }
 
 /**
@@ -73,7 +181,10 @@ export function validManifest(m: unknown): UpdateManifest | null {
   for (const f of o.files) {
     if (!f || typeof f.path !== 'string' || typeof f.sha256 !== 'string') return null
   }
-  return o as UpdateManifest
+  // ★ 差量是**可选增强**：坏掉的 patches 只丢差量，不能让整份清单作废
+  //   —— 否则发布端一次手误就会让所有人连"有没有新版本"都查不出来。
+  const patches = Array.isArray(o.patches) ? o.patches.filter(validPatch) : []
+  return { ...(o as UpdateManifest), patches }
 }
 
 function parseVer(v: unknown): [number, number, number] | null {
