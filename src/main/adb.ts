@@ -1,7 +1,47 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import net from 'node:net'
 import os from 'node:os'
-import type { DeviceInfo, DeviceState, AdbShellResult } from '@shared/types'
+import type { DeviceInfo, DeviceState, AdbShellResult, ListDirResult, RemoteEntry } from '@shared/types'
+
+/** shell 单引号转义：把 ' 变成 '\'' ，使任意路径都能安全嵌进单引号里。 */
+function shQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`
+}
+
+/** 规范化设备端路径：补前导 /、折叠重复 /、去掉尾部 /（根目录除外）。 */
+export function normalizeRemotePath(input: string): string {
+  let p = (input || '').trim().replace(/\\/g, '/')
+  if (!p) return '/sdcard'
+  if (!p.startsWith('/')) p = '/' + p
+  p = p.replace(/\/{2,}/g, '/')
+  if (p.length > 1) p = p.replace(/\/+$/, '')
+  return p || '/'
+}
+
+/** 设备端上级目录；根目录返回 null。 */
+export function remoteParent(p: string): string | null {
+  if (!p || p === '/') return null
+  const i = p.lastIndexOf('/')
+  return i <= 0 ? '/' : p.slice(0, i)
+}
+
+/**
+ * 禁止删除的路径白名单。
+ * 这些路径一旦 rm -rf 会直接毁掉设备的存储根或系统分区，且在 UI 上很难修复。
+ */
+const PROTECTED_PATHS = new Set([
+  '/',
+  '/sdcard',
+  '/sdcard/Android',
+  '/storage',
+  '/storage/emulated',
+  '/storage/emulated/0',
+  '/system',
+  '/data',
+  '/vendor',
+  '/product',
+  '/apex'
+])
 import { intToIpv4, subnetPrefixToRange, type IpRange } from '@shared/subnet'
 
 /** 本机所有 IPv4 网卡的网段列表（如 ["192.168.11"]），不管物理还是虚拟。 */
@@ -323,6 +363,73 @@ export class AdbClient {
 
   async pull(serial: string, remote: string, local: string): Promise<AdbShellResult> {
     return this.exec(['-s', serial, 'pull', remote, local], 120000)
+  }
+
+  /**
+   * 列出设备端目录内容。
+   *
+   * 用 `stat -c` 而不是解析 `ls -l`：stat 的输出是机器可读的定长字段，
+   * 文件名放在最后一列（用 `|` 分隔并按残余段拼回），因此空格、括号、中文都不会解析错。
+   * 仅 `|` 和换行出现在文件名里才会出问题（实测极罕见）。
+   *
+   * 退出码约定：9 = 路径不存在/不可进入；8 = 无读/执行权限。
+   */
+  async listDir(serial: string, remotePath: string): Promise<ListDirResult> {
+    const dir = normalizeRemotePath(remotePath)
+    const script =
+      `cd ${shQuote(dir)} 2>&1 || exit 9; ` +
+      `test -r . && test -x . || { echo 'Permission denied'; exit 8; }; ` +
+      // `*` 不匹配时 sh 会把字面量传下去并报错，用 2>/dev/null 吞掉；空目录不应算失败
+      `stat -c '%A|%s|%Y|%F|%n' * .[!.]* 2>/dev/null; exit 0`
+    const r = await this.shell(serial, script, 30000)
+    const parent = remoteParent(dir)
+    if (r.code === 9 || r.code === 8) {
+      const msg = (r.stdout || r.stderr).trim()
+      return { ok: false, path: dir, parent, entries: [], message: msg || '无法读取该目录' }
+    }
+
+    const entries: RemoteEntry[] = []
+    for (const line of r.stdout.split(/\r?\n/)) {
+      if (!line) continue
+      const parts = line.split('|')
+      if (parts.length < 5) continue
+      const [mode, sizeStr, mtimeStr, typeStr] = parts
+      const name = parts.slice(4).join('|')
+      if (!name || name === '.' || name === '..') continue
+
+      const isDir = mode.startsWith('d') || typeStr === 'directory'
+      const isLink = mode.startsWith('l') || typeStr === 'symbolic link'
+      const size = Number(sizeStr)
+      const mtime = Number(mtimeStr)
+      entries.push({
+        name,
+        path: dir === '/' ? `/${name}` : `${dir}/${name}`,
+        kind: isDir ? 'dir' : isLink ? 'link' : typeStr === 'regular file' ? 'file' : 'other',
+        size: isDir || !Number.isFinite(size) ? null : size,
+        mtime: Number.isFinite(mtime) && mtime > 0 ? mtime * 1000 : null,
+        mode
+      })
+    }
+
+    // 目录在前，同类按名称自然序（1、2、10 而不是 1、10、2）
+    entries.sort(
+      (a, b) =>
+        (a.kind === 'dir' ? 0 : 1) - (b.kind === 'dir' ? 0 : 1) ||
+        a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
+    )
+    return { ok: true, path: dir, parent, entries }
+  }
+
+  /** 删除设备端文件/目录（递归）。受保护路径会被直接拒绝。 */
+  async removePath(serial: string, remotePath: string): Promise<AdbShellResult> {
+    const p = normalizeRemotePath(remotePath)
+    if (PROTECTED_PATHS.has(p) || p.split('/').filter(Boolean).length < 2) {
+      return { code: -1, stdout: '', stderr: `已拒绝删除受保护路径：${p}` }
+    }
+    const script =
+      `if [ ! -e ${shQuote(p)} ] && [ ! -L ${shQuote(p)} ]; then echo '路径不存在'; exit 4; fi; ` +
+      `rm -rf ${shQuote(p)}`
+    return this.shell(serial, script, 60000)
   }
 
   /** Capture a binary stream from `exec-out` (e.g. screencap). Returns raw Buffer. */

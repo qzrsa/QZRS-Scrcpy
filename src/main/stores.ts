@@ -29,6 +29,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   // Python 外挂桥默认关：这是给会写 Python 的用户的外挂能力，不该默认开放端口。
   bridgeEnabled: false,
   bridgePort: 17399,
+  pythonPath: '',
   session: {
     bitRate: 8000000,
     maxFps: 0,

@@ -97,6 +97,31 @@ export class PythonBridge {
     return { running: this.running, port: this.port, token: this.running ? this.token : '' }
   }
 
+  /**
+   * 释放所有会话上仍按住的手指（按跟踪的最后坐标补发 UP）。
+   * Python 脚本进程被杀/异常退出时不会执行到 touchup，虚拟手指会悬挂在
+   * scrcpy 控制链路上——PyScriptManager 在每次进程退出后调用本方法兜底。
+   * 没有按住的手指时是零开销的空操作。
+   */
+  releaseAllPointers(): void {
+    if (this.activePointers.size === 0) return
+    const sizes = new Map(
+      this.hooks.listSessions().map((s) => [s.sessionId, { width: s.width, height: s.height }])
+    )
+    for (const [sessionId, m] of [...this.activePointers]) {
+      const size = sizes.get(sessionId)
+      if (!size || size.width <= 0 || size.height <= 0) {
+        // 会话不存在或视频尺寸未知：只清跟踪，无法（也无需）补发 UP
+        this.activePointers.delete(sessionId)
+        continue
+      }
+      for (const [finger, p] of [...m]) {
+        this.rawTouch(finger, 1, p.x, p.y, 0, size.width, size.height, sessionId)
+      }
+      this.activePointers.delete(sessionId)
+    }
+  }
+
   /** 启动（已运行则先停再按新端口起）。Token 保持本次应用运行期间稳定。 */
   async start(port: number): Promise<void> {
     await this.stop()

@@ -12,6 +12,8 @@ interface Props {
    * 宽度存 localStorage（`drawer-w-${key}`），下次打开保持。
    */
   resizableKey?: string
+  /** 没存过宽度时的初始宽度（px）；不传则用 .drawer / .drawer.wide 的 CSS 默认值 */
+  defaultWidth?: number
 }
 
 const MIN_W = 380
@@ -28,7 +30,7 @@ function loadWidth(key: string | undefined): number | null {
   return null
 }
 
-export function Drawer({ title, wide, onClose, children, resizableKey }: Props): JSX.Element {
+export function Drawer({ title, wide, onClose, children, resizableKey, defaultWidth }: Props): JSX.Element {
   const [width, setWidth] = useState<number | null>(() => loadWidth(resizableKey))
   const draggingRef = useRef(false)
 
@@ -64,7 +66,12 @@ export function Drawer({ title, wide, onClose, children, resizableKey }: Props):
     }
   }, [resizableKey])
 
-  const style = width !== null ? { width: `${width}px` } : undefined
+  const style =
+    width !== null
+      ? { width: `${width}px` }
+      : defaultWidth
+        ? { width: `${defaultWidth}px` }
+        : undefined
 
   return (
     <>

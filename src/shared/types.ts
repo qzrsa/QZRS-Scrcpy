@@ -219,6 +219,8 @@ export interface AppSettings {
   bridgeEnabled: boolean
   /** Python 桥监听端口（1024~65535），仅 127.0.0.1 */
   bridgePort: number
+  /** Python 解释器（脚本面板运行 scripts/python/*.py 用）；空串 = 用 PATH 里的 python */
+  pythonPath: string
 }
 
 /**
@@ -297,6 +299,33 @@ export interface OpResult {
   message?: string
 }
 
+/** 设备端目录项（`device:listDir` 返回） */
+export interface RemoteEntry {
+  /** 文件名（不含路径） */
+  name: string
+  /** 设备端完整路径（如 /sdcard/Download/a.txt） */
+  path: string
+  /** dir = 目录（可进入）；link = 符号链接（也允许尝试进入）；file = 普通文件；other = 设备/管道等 */
+  kind: 'dir' | 'file' | 'link' | 'other'
+  /** 字节数；目录或未知为 null */
+  size: number | null
+  /** 修改时间（epoch ms）；解析不出为 null */
+  mtime: number | null
+  /** 权限串（如 drwxrws---） */
+  mode: string
+}
+
+/** `device:listDir` 的返回 */
+export interface ListDirResult {
+  ok: boolean
+  /** 规范化后的目录路径 */
+  path: string
+  /** 上级目录；根目录为 null */
+  parent: string | null
+  entries: RemoteEntry[]
+  message?: string
+}
+
 /** `devices:scan` 的返回：局域网 5555 端口扫描结果 */
 export interface LanScanResult {
   ok: boolean
@@ -330,6 +359,27 @@ export type ScriptRunEvent =
   | { runId: string; scriptId: string; name: string; state: 'done'; elapsedMs: number }
   | { runId: string; scriptId: string; name: string; state: 'stopped' }
   | { runId: string; scriptId: string; name: string; state: 'error'; message: string; /** 出错的用户脚本行号（1 起，解析不出为 undefined） */ line?: number }
+
+/**
+ * Python 脚本（scripts/python/*.py）。面板只负责「扫描列出 + 独立进程运行/停止」，
+ * 不在 app 内编辑；脚本自身通过 Python 桥（qzrs.py）控制投屏会话。
+ */
+export interface PyScriptFile {
+  /** 文件名（含 .py），目录内的唯一键 */
+  file: string
+  /** 展示名（去 .py） */
+  name: string
+  sizeBytes: number
+  updatedAt: number
+}
+
+/** Python 脚本运行事件（主进程 → 渲染层 'pyscript:event' 通道） */
+export type PyRunEvent =
+  | { runId: string; file: string; name: string; state: 'started' }
+  | { runId: string; file: string; name: string; state: 'log'; line: string; stream: 'out' | 'err' }
+  | { runId: string; file: string; name: string; state: 'done'; /** 进程退出码（null = 被信号终止） */ code: number | null; elapsedMs: number }
+  | { runId: string; file: string; name: string; state: 'stopped' }
+  | { runId: string; file: string; name: string; state: 'error'; message: string }
 
 /** waitImage(name, opts) 的返回值：坐标为视频像素坐标（与 tap 一致）；未找到 found=false */
 export interface WaitImageResult {

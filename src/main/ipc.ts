@@ -1,15 +1,16 @@
 import { ipcMain, dialog, clipboard, app, BrowserWindow, shell, type IpcMainInvokeEvent } from 'electron'
 import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
-import { readFileSync, writeFileSync, copyFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { AdbClient, deepScanSubnets, fastScanSubnets, scanLanAdb } from './adb'
+import { AdbClient, deepScanSubnets, fastScanSubnets, normalizeRemotePath, scanLanAdb } from './adb'
 import { mergeRanges, parseSubnets, subnetPrefixToRange, type IpRange, type ParsedSubnets } from '@shared/subnet'
 import { mergeDeviceHistory } from './devices'
 import { ScrcpySession } from './session'
 import { Store, debugLogDirCandidates } from './stores'
 import { DebugFileLogger } from './debuglog'
 import { ScriptEngine } from './scriptengine'
+import { PyScriptManager } from './pyscripts'
 import { PythonBridge, BridgeHttpError } from './bridge'
 import { writeBridgeClients } from './bridgeclients'
 import { OcrModelDownloader, type OcrProgress } from './ocrdownload'
@@ -395,6 +396,20 @@ export function registerIpc(store: Store): AppManager {
   function bridgeClientDir(): string {
     return join(app.getPath('userData'), 'data', 'bridge')
   }
+
+  // ---- Python 脚本（scripts/python/*.py，独立进程运行）----
+  // 目录按需创建；脚本与 JS 脚本分开存放（JS 是 json、Python 是 .py 源文件）。
+  function pyScriptsDir(): string {
+    const d = join(store.getScriptsDir(), 'python')
+    if (!existsSync(d)) mkdirSync(d, { recursive: true })
+    return d
+  }
+
+  const pyManager = new PyScriptManager({
+    onEvent: (evt) => send('pyscript:event', evt),
+    // Python 进程退出后释放桥上悬挂的手指（脚本可能死在 touch_down 之后）
+    releasePointers: () => bridge.releaseAllPointers()
+  })
 
   /** 按设置启停 Python 桥；客户端文件无论开关与否都写（设置面板要展示目录） */
   function applyBridge(): void {
@@ -890,6 +905,27 @@ export function registerIpc(store: Store): AppManager {
     return { ok: true, dir: store.getScriptsDir() }
   })
 
+  // ---- Python 脚本（scripts/python/*.py，独立进程运行）----
+  ipcMain.handle('pyscripts:list', () => {
+    const dir = pyScriptsDir()
+    return { dir, scripts: pyManager.list(dir) }
+  })
+  ipcMain.handle('pyscripts:run', (_e, file: string) => {
+    const s = store.getSettings()
+    // 注入桥 Token + 桥客户端目录（qzrs.py）：脚本无需手动配置即可 import qzrs 并连桥
+    const info = bridge.info()
+    const env: Record<string, string> = {}
+    if (info.running && info.token) env.QZRS_TOKEN = info.token
+    return pyManager.run(pyScriptsDir(), file, s.pythonPath, bridgeClientDir(), env)
+  })
+  ipcMain.handle('pyscripts:stop', (_e, runId: string) => ({ ok: pyManager.stop(String(runId ?? '')) }))
+  ipcMain.handle('pyscripts:running', () => pyManager.running())
+  ipcMain.handle('pyscripts:openDir', () => {
+    const dir = pyScriptsDir()
+    void shell.openPath(dir)
+    return { ok: true, dir }
+  })
+
   // waitImage 模板：渲染层从截图上框选裁出 PNG（base64），主进程落盘到 scripts/templates/
   ipcMain.handle('scripts:saveTemplate', (_e, name: string, base64Png: string) => {
     try {
@@ -1070,6 +1106,55 @@ export function registerIpc(store: Store): AppManager {
     }
   })
 
+  // ---- 设备文件管理器 ----
+  ipcMain.handle('device:listDir', async (_e, serial: string, remotePath: string) => {
+    try {
+      const a = ensureAdb()
+      return await a.listDir(serial, remotePath)
+    } catch (err) {
+      const p = normalizeRemotePath(remotePath)
+      return { ok: false, path: p, parent: null, entries: [], message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('device:delete', async (_e, serial: string, remotePath: string) => {
+    try {
+      const a = ensureAdb()
+      const r = await a.removePath(serial, remotePath)
+      if (r.code === 0) return { ok: true, message: remotePath }
+      return { ok: false, message: (r.stderr || r.stdout).trim() || `删除失败（exit ${r.code}）` }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // 下载到用户选择的本地文件夹（文件/目录都适用；目录会被整个拉取）
+  ipcMain.handle('device:pullTo', async (_e, serial: string, remotePath: string) => {
+    try {
+      const win = getWin()
+      const pick = await dialog.showOpenDialog(win!, {
+        title: '选择保存到的文件夹',
+        properties: ['openDirectory', 'createDirectory']
+      })
+      if (pick.canceled || !pick.filePaths[0]) return { ok: false, message: '已取消' }
+      const target = pick.filePaths[0]
+      const a = ensureAdb()
+      const r = await a.pull(serial, remotePath, target)
+      return r.code === 0
+        ? { ok: true, message: target }
+        : { ok: false, message: (r.stderr || r.stdout).trim() || '下载失败' }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // 多选文件（上传用）
+  ipcMain.handle('dialog:openFiles', async (_e: IpcMainInvokeEvent) => {
+    const win = getWin()
+    const res = await dialog.showOpenDialog(win!, { properties: ['openFile', 'multiSelections'] })
+    return res.canceled ? [] : res.filePaths
+  })
+
   ipcMain.handle('file:save', async (_e, defaultName: string, base64: string) => {
     try {
       const win = getWin()
@@ -1104,6 +1189,7 @@ export function registerIpc(store: Store): AppManager {
     async dispose() {
       debugLogger.flushSync()
       scriptEngine.stopAll() // 停掉所有运行中的脚本（等价于抬起手指，防止退出后虚拟手指悬挂）
+      pyManager.stopAll() // Python 脚本子进程一并杀掉（taskkill /T 连树杀）
       await bridge.stop() // Python 桥一并关闭（手势中途退出最多丢一次 UP，scrcpy 会话本身随进程结束）
       killWatcher()
       stopPolling()

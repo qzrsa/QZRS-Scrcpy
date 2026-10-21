@@ -1971,3 +1971,243 @@ body.drawer-resizing {
 .ctx-item.danger:hover:not(:disabled) {
   background: rgba(248, 113, 113, 0.14);
 }
+
+/* ===== 分段切换（终端 / 文件管理） ===== */
+.seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  margin-bottom: 16px;
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+}
+
+.seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 1px);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.seg button:hover {
+  color: var(--text);
+}
+
+.seg button.active {
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* ===== 设备文件管理器 ===== */
+.fm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fm-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fm-path {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.fm-path::-webkit-scrollbar {
+  height: 4px;
+}
+
+.fm-crumb-wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+.fm-crumb {
+  border: 0;
+  background: transparent;
+  padding: 0 3px;
+  border-radius: 3px;
+  font: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.fm-crumb:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+
+.fm-crumb:disabled {
+  color: var(--text);
+  cursor: default;
+}
+
+.fm-crumb-sep {
+  color: var(--text-faint);
+}
+
+.fm-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 78px 122px 66px;
+  gap: 8px;
+  align-items: center;
+}
+
+.fm-head {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.fm-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.fm-row {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.fm-row:hover {
+  background: var(--bg-hover);
+}
+
+.fm-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: default;
+}
+
+.fm-name.is-dir {
+  cursor: pointer;
+}
+
+.fm-name.is-dir:hover .fm-name-text {
+  text-decoration: underline;
+}
+
+.fm-name svg {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+}
+
+.fm-name.is-dir svg {
+  color: var(--accent);
+}
+
+.fm-name-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fm-tag {
+  flex: 0 0 auto;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.fm-size {
+  text-align: right;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.fm-time {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.fm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+.fm-danger:hover:not(:disabled) {
+  color: var(--red);
+}
+
+.fm-error {
+  padding: 6px 9px;
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  font-size: 12px;
+  color: var(--red);
+}
+
+.fm-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 6px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  font-size: 12px;
+}
+
+.fm-confirm span {
+  flex: 1;
+  min-width: 160px;
+}
+
+.fm-confirm b {
+  word-break: break-all;
+}
+
+.fm-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.fm-status {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-dim);
+}

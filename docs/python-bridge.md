@@ -14,6 +14,27 @@
 
 设置 → Python 脚本桥：打开开关、设端口（默认 17399）并保存。面板会显示 Token，并能看到客户端文件所在目录（`<userData>/data/bridge/`，含 `qzrs.py` 与 `example.py`，每次启动自动重写——要写脚本就在同目录新建自己的 `.py`，别改这两个）。
 
+## 脚本面板一键运行（scripts/python 目录）
+
+不想开终端跑脚本？把 `.py` 放进 **脚本目录下的 `python/` 子目录**（脚本面板 → Python 脚本 → 文件夹图标可直达），面板会自动扫描列出：
+
+- 点 ▶ 运行（独立 Python 进程，随面板日志实时输出 stdout/stderr）、点 ■ 停止（Windows 下 taskkill 连子进程树一起杀）。
+- **环境自动注入**，脚本里无需手抄 Token：
+  - `QZRS_TOKEN` —— 当前桥 Token（桥未开启则不注入）；
+  - `PYTHONPATH` 前置桥客户端目录 —— 直接 `from qzrs import QzrsClient` 即可，不用复制 qzrs.py。
+- Python 解释器路径可在面板里改（默认用 PATH 里的 `python`）。
+- app 退出时会杀掉所有 Python 子进程，并给桥上仍按住的手指补发抬起（防虚拟手指悬挂）。
+
+```python
+# scripts/python/hello.py —— 放进目录、面板点运行即可
+import os
+from qzrs import QzrsClient
+
+qz = QzrsClient(token=os.environ["QZRS_TOKEN"])
+print(qz.info())
+qz.tap(960, 540)
+```
+
 ## 坐标系
 
 所有坐标 = **投屏视频像素坐标**（与 app 内调试浮层、内置 JS 脚本引擎一致）。会话视频宽高从 `info()` 里拿。

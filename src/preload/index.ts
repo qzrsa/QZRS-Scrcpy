@@ -7,12 +7,15 @@ import type {
   KeymapConfig,
   ScriptInfo,
   ScriptRunEvent,
+  PyScriptFile,
+  PyRunEvent,
   FrameEvent,
   StreamMeta,
   SessionStateEvent,
   SessionStats,
   AdbShellResult,
   OpResult,
+  ListDirResult,
   LanScanResult,
   AudioMeta,
   AudioFrameEvent
@@ -50,6 +53,18 @@ const api = {
     ipcRenderer.invoke('device:push', serial, localPath, remotePath),
   pullFile: (serial: string, remotePath: string): Promise<OpResult> =>
     ipcRenderer.invoke('device:pull', serial, remotePath),
+  /** ---- 设备文件管理器 ---- */
+  /** 列出设备端目录（返回结构化条目：名称/类型/大小/修改时间） */
+  listDir: (serial: string, remotePath: string): Promise<ListDirResult> =>
+    ipcRenderer.invoke('device:listDir', serial, remotePath),
+  /** 删除设备端文件或目录（目录递归删除；受保护路径由主进程拒绝） */
+  deleteRemote: (serial: string, remotePath: string): Promise<OpResult> =>
+    ipcRenderer.invoke('device:delete', serial, remotePath),
+  /** 下载到用户选择的本地文件夹（文件与目录都适用） */
+  pullRemoteTo: (serial: string, remotePath: string): Promise<OpResult> =>
+    ipcRenderer.invoke('device:pullTo', serial, remotePath),
+  /** 多选本地文件（上传用） */
+  openFilesDialog: (): Promise<string[]> => ipcRenderer.invoke('dialog:openFiles'),
   screenshot: (serial: string): Promise<{ ok: boolean; data?: string; message?: string }> =>
     ipcRenderer.invoke('device:screenshot', serial),
   startRecord: (serial: string, bitRate: number): Promise<OpResult> =>
@@ -111,6 +126,21 @@ const api = {
     const l = (_e: unknown, d: ScriptRunEvent): void => cb(d)
     ipcRenderer.on('script:event', l)
     return () => ipcRenderer.removeListener('script:event', l)
+  },
+  /** ---- Python 脚本（scripts/python/*.py，独立进程运行）---- */
+  /** 扫描 scripts/python 目录下的 .py（每次调用都重新扫，放进去即出现） */
+  listPyScripts: (): Promise<{ dir: string; scripts: PyScriptFile[] }> => ipcRenderer.invoke('pyscripts:list'),
+  /** 运行 .py：主进程 spawn 设置里的 Python 解释器；环境自动注入 QZRS_TOKEN 与桥客户端 PYTHONPATH */
+  runPyScript: (file: string): Promise<{ ok: boolean; runId?: string; message?: string }> =>
+    ipcRenderer.invoke('pyscripts:run', file),
+  stopPyScript: (runId: string): Promise<OpResult> => ipcRenderer.invoke('pyscripts:stop', runId),
+  runningPyScripts: (): Promise<Array<{ runId: string; file: string; name: string }>> =>
+    ipcRenderer.invoke('pyscripts:running'),
+  openPyScriptsDir: (): Promise<{ ok: boolean; dir?: string }> => ipcRenderer.invoke('pyscripts:openDir'),
+  onPyScriptEvent: (cb: (e: PyRunEvent) => void): (() => void) => {
+    const l = (_e: unknown, d: PyRunEvent): void => cb(d)
+    ipcRenderer.on('pyscript:event', l)
+    return () => ipcRenderer.removeListener('pyscript:event', l)
   },
   /** 调试日志批量落盘（fire-and-forget；主进程在设置开启+调试打开时才会真正建目录写文件） */
   debugLog: (lines: string[]): void => ipcRenderer.send('debug:log', lines),

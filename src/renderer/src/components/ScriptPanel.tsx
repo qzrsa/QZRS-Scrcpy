@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
-import type { ScriptInfo, ScriptRunEvent } from '@shared/types'
+import type { PyRunEvent, PyScriptFile, ScriptInfo, ScriptRunEvent } from '@shared/types'
 import { Drawer } from './Drawer'
-import { IconCamera, IconClose, IconPlus, IconRecord, IconScript, IconStop, IconTrash } from './icons'
+import { IconCamera, IconClose, IconFolder, IconPlay, IconPlus, IconRecord, IconRefresh, IconScript, IconStop, IconTrash } from './icons'
 
 interface Props {
   /** 当前活跃会话（投屏开着才有）；脚本通过它把指令发到设备 */
@@ -89,6 +89,13 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
   const [dirty, setDirty] = useState(false)
   const [lines, setLines] = useState<LogLine[]>([])
   const [templates, setTemplates] = useState<TplItem[]>([])
+  // ---- Python 脚本（scripts/python/*.py，独立进程运行）----
+  const [pyScripts, setPyScripts] = useState<PyScriptFile[]>([])
+  const [pyDir, setPyDir] = useState('')
+  const [pythonPath, setPythonPath] = useState('')
+  /** Python 运行状态：runId -> file */
+  const pyRunsRef = useRef(new Map<string, string>())
+  const [pyRunFiles, setPyRunFiles] = useState<Set<string>>(new Set())
   /** 本面板关心的运行状态：runId -> {scriptId, state} */
   const runsRef = useRef(new Map<string, { scriptId: string; state: string; startedAt: number }>())
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
@@ -114,6 +121,8 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
       }
     })
     void window.api.listTemplates().then(setTemplates)
+    void refreshPyScripts()
+    void window.api.getSettings().then((s) => setPythonPath(s.pythonPath || ''))
   }, [])
 
   // 录制生成的代码回填：追加到当前编辑器内容后
@@ -148,11 +157,60 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
     return off
   }, [pushLine])
 
+  // Python 脚本运行事件 → 同一日志区 + 运行状态
+  useEffect(() => {
+    const off = window.api.onPyScriptEvent((e: PyRunEvent) => {
+      if (e.state === 'started') {
+        pyRunsRef.current.set(e.runId, e.file)
+        pushLine('sys', `▶ Python「${e.name}」已启动（独立进程）`)
+      } else if (e.state === 'log') {
+        pushLine(e.stream === 'err' ? 'err' : 'log', e.line)
+      } else if (e.state === 'done') {
+        const tail = e.code === 0 ? '正常' : `退出码 ${e.code ?? '?'}`
+        pushLine(e.code === 0 ? 'sys' : 'err', `${e.code === 0 ? '✔' : '✘'} Python「${e.name}」已退出（${tail}，${e.elapsedMs}ms）`)
+        pyRunsRef.current.delete(e.runId)
+      } else if (e.state === 'stopped') {
+        pushLine('sys', `■ Python「${e.name}」已停止`)
+        pyRunsRef.current.delete(e.runId)
+      } else if (e.state === 'error') {
+        pushLine('err', `✘ Python「${e.name}」：${e.message}`)
+        pyRunsRef.current.delete(e.runId)
+      }
+      setPyRunFiles(new Set(pyRunsRef.current.values()))
+    })
+    return off
+  }, [pushLine])
+
   // 日志跟随滚动到底部
   useEffect(() => {
     const el = logRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [lines])
+
+  // ---- Python 脚本操作 ----
+  function refreshPyScripts(): void {
+    void window.api.listPyScripts().then((r) => {
+      setPyDir(r.dir)
+      setPyScripts(r.scripts)
+    })
+  }
+
+  const runPy = async (file: string): Promise<void> => {
+    const r = await window.api.runPyScript(file)
+    if (!r.ok) onToast(r.message || '运行失败', 'error')
+  }
+
+  const stopPy = (file: string): void => {
+    for (const [runId, f] of pyRunsRef.current) {
+      if (f === file) void window.api.stopPyScript(runId)
+    }
+  }
+
+  /** Python 解释器路径失焦时持久化（空串 = 用 PATH 里的 python） */
+  const savePythonPath = (): void => {
+    const v = pythonPath.trim()
+    void window.api.getSettings().then((s) => window.api.setSettings({ ...s, pythonPath: v }))
+  }
 
   const select = (s: ScriptInfo): void => {
     if (dirty && !window.confirm('当前脚本有未保存的修改，切换将丢失，确定？')) return
@@ -418,6 +476,46 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
               </div>
             ))}
           </div>
+
+          <div className="script-list-head" style={{ marginTop: 10 }}>
+            <span>Python 脚本（{pyScripts.length}）</span>
+            <span style={{ display: 'flex', gap: 2 }}>
+              <button className="icon-btn" title="重新扫描目录" onClick={refreshPyScripts}>
+                <IconRefresh width={14} height={14} />
+              </button>
+              <button className="icon-btn" title={`打开目录${pyDir ? `：${pyDir}` : ''}`} onClick={() => void window.api.openPyScriptsDir()}>
+                <IconFolder width={15} height={15} />
+              </button>
+            </span>
+          </div>
+          <div className="script-list-scroll tpl-list">
+            {pyScripts.length === 0 && <div className="hint">把 .py 放进 scripts\python 目录后点刷新即自动列出；脚本通过 Python 桥（qzrs.py）控制设备，日志走下方同一块运行日志</div>}
+            {pyScripts.map((p) => (
+              <div key={p.file} className="script-item" title={`${p.file}（${(p.sizeBytes / 1024).toFixed(0)} KB）`}>
+                <IconScript width={14} height={14} />
+                <span className="script-item-name">{p.name}</span>
+                {pyRunFiles.has(p.file) && <span className="script-run-dot" title="运行中" />}
+                {pyRunFiles.has(p.file) ? (
+                  <button className="icon-btn tpl-del" title="停止（结束进程树）" onClick={() => stopPy(p.file)}>
+                    <IconStop width={13} height={13} />
+                  </button>
+                ) : (
+                  <button className="icon-btn tpl-del" title="运行（独立 Python 进程）" onClick={() => void runPy(p.file)}>
+                    <IconPlay width={13} height={13} />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <input
+            className="text-input"
+            style={{ marginTop: 8, fontSize: 12 }}
+            value={pythonPath}
+            placeholder="Python 解释器（空 = PATH 里的 python）"
+            title="如 C:\\Python313\\python.exe 或某个 venv 的 python.exe；失焦自动保存"
+            onChange={(e) => setPythonPath(e.target.value)}
+            onBlur={savePythonPath}
+          />
         </div>
 
         {/* 右：编辑器 + 日志（编辑器吃满剩余高度，日志高度可拖） */}
