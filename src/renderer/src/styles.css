@@ -712,6 +712,134 @@ body.drawer-resizing {
   padding: 20px;
 }
 
+/* ------------------------------------------------------------------ 设置页分区
+   设置项从 24 条平铺改成 6 个可折叠分区（SettingsPanel 的 <Section>）。
+   优先级靠"多久动一次"而不是字段在代码里的顺序：常用组默认展开，技术细节默认收起。
+   颜色一律走 var(--)，浅色主题下才不会出现深色块。 */
+.sec {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elevated);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 11px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.sec-head:hover {
+  background: var(--bg-hover);
+}
+
+.sec-head:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.sec-arrow {
+  flex: 0 0 auto;
+  color: var(--text-faint);
+  /* 收起时箭头朝右，展开时朝下 */
+  transform: rotate(-90deg);
+  transition: transform 0.18s ease;
+}
+
+.sec.open .sec-arrow {
+  transform: rotate(0deg);
+}
+
+.sec-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 折叠时的状态徽标：把"要不要展开看一眼"的判断依据留在标题上 */
+.sec-badge {
+  flex: 0 0 auto;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+}
+
+.sec-badge.on {
+  color: var(--accent);
+}
+
+.sec-body {
+  padding: 12px 12px 0;
+  border-top: 1px solid var(--border);
+}
+
+/* 分区内的间距比抽屉默认的 16px 紧一点（选择器带上 .drawer-body 是为了压过下面那条通用规则） */
+.drawer-body .sec-body .field {
+  margin-bottom: 14px;
+}
+
+/* 三个数字并排（码率 / 分辨率 / 帧率）：它们经常一起调，各占一行太浪费纵向空间 */
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.drawer-body .field-grid .field {
+  margin-bottom: 12px;
+}
+
+/* 保存栏吸附在抽屉底部：分区多了以后，滚到哪儿都能看到"还没保存"。
+   ★ 这里不能靠给保存栏加负 margin 去"抵掉"抽屉的 20px 内边距 —— 负 margin 会让滚动区
+     凭空少 20px，最后一个分区永远被保存栏盖住一截（实测就是这么翻车的）。
+     正确做法是把抽屉自己的下内边距去掉，让保存栏真的坐在内容末尾。 */
+.drawer-body:has(.settings-foot) {
+  padding-bottom: 0;
+}
+
+.settings-foot {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 16px -20px 0;
+  padding: 12px 20px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+}
+
+.settings-foot-note {
+  margin-right: auto;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.settings-foot-note.warn {
+  color: var(--amber);
+}
+
+.settings-foot-note.err {
+  color: var(--red);
+}
+
 .drawer-body .field {
   margin-bottom: 16px;
 }
