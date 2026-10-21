@@ -2274,6 +2274,11 @@ body.drawer-resizing {
   color: var(--red);
   font-weight: 600;
 }
+.upd-when {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-dim);
+}
 
 /* 进度条：下载 130MB 时唯一能看出"在动"的东西 */
 .upd-bar {

@@ -207,6 +207,19 @@ export function SettingsPanel({ onClose }: { onClose: () => void }): JSX.Element
           {upd?.checkedAtText && <span className="upd-when">上次检查 {upd.checkedAtText}</span>}
         </div>
 
+        {/* 状态原因要显式给出来：用户看到"更新不可用"时最需要的是原因
+            （便携版？清单没发？超时？），而不是一个静默的灰按钮 */}
+        {upd && !upd.supported && (
+          <div className="hint" style={{ marginTop: -2 }}>
+            {upd.unsupportedReason}
+          </div>
+        )}
+        {upd?.supported && upd.reason && (
+          <div className="hint" style={{ marginTop: -2 }}>
+            {upd.reason}
+          </div>
+        )}
+
         {upd?.progress && (
           <div className="upd-bar" role="progressbar" aria-valuenow={upd.progress.pct ?? 0} aria-valuemin={0} aria-valuemax={100}>
             <div className="upd-bar-fill" style={{ width: `${upd.progress.pct ?? 0}%` }} />
