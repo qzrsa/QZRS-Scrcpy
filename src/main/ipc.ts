@@ -916,11 +916,12 @@ export function registerIpc(store: Store): AppManager {
 
   // 运行脚本：渲染层把目标会话 sessionId 发过来（一个脚本同一时间只跑一份）。
   // 引擎把 started/log/done/stopped/error 通过 'script:event' 推给渲染层。
-  ipcMain.handle('scripts:run', (_e, scriptId: string, sessionId: string) => {
+  ipcMain.handle('scripts:run', (_e, scriptId: string, sessionId: string, loopMs?: number) => {
     try {
       const script = store.getScripts().find((s) => s.id === String(scriptId))
       if (!script) return { ok: false, message: '脚本不存在' }
-      const { runId } = scriptEngine.run(script, String(sessionId))
+      // loopMs > 0 = 录制宏的「每 N 秒重播一遍」，由引擎包成 while 循环
+      const { runId } = scriptEngine.run(script, String(sessionId), { loopMs: Number(loopMs) || 0 })
       return { ok: true, runId }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }

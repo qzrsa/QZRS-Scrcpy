@@ -89,6 +89,26 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
   const [dirty, setDirty] = useState(false)
   const [lines, setLines] = useState<LogLine[]>([])
   const [templates, setTemplates] = useState<TplItem[]>([])
+  // ---- 循环（录制宏）：整段跑完等 N 秒再从头跑，直到点「停止」----
+  // 存 localStorage：同一台机器上"我习惯 30 秒一轮"这种偏好没必要进脚本本身。
+  const [loopOn, setLoopOn] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('script-loop-on') === '1'
+    } catch {
+      return false
+    }
+  })
+  const [loopSecText, setLoopSecText] = useState<string>(() => {
+    try {
+      return localStorage.getItem('script-loop-sec') || '30'
+    } catch {
+      return '30'
+    }
+  })
+  /** 秒 → ms（1 秒 ~ 24 小时；空/非法回落到 30 秒） */
+  const loopMs = loopOn
+    ? Math.max(1, Math.min(86400, Math.round(Number(loopSecText) || 30))) * 1000
+    : 0
   // ---- Python 脚本（scripts/python/*.py，独立进程运行）----
   const [pyScripts, setPyScripts] = useState<PyScriptFile[]>([])
   const [pyDir, setPyDir] = useState('')
@@ -271,8 +291,9 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
     }
     const target = selectedId
     if (!target) return
-    const r = await window.api.runScript(target, sessionId)
+    const r = await window.api.runScript(target, sessionId, loopMs)
     if (!r.ok) onToast(r.message || '运行失败', 'error')
+    else if (loopMs > 0) onToast(`开始循环：每 ${loopMs / 1000} 秒执行一遍，点停止结束`, 'info')
   }
 
   const stop = (): void => {
@@ -541,10 +562,53 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
                 <IconStop width={15} height={15} /> 停止
               </button>
             ) : (
-              <button className="btn btn-primary" onClick={() => void run()} disabled={!code.trim() || !sessionId} title="运行（Ctrl+Enter）">
+              <button
+                className="btn btn-primary"
+                onClick={() => void run()}
+                disabled={!code.trim() || !sessionId}
+                title={loopMs > 0 ? `运行（循环：每 ${loopMs / 1000} 秒一遍）Ctrl+Enter` : '运行（Ctrl+Enter）'}
+              >
                 运行
               </button>
             )}
+            {/* 循环：录制完直接勾上就能"每隔 N 秒重播"，不用写 while/await */}
+            <label
+              className={`loop-box ${loopOn ? 'on' : ''}`}
+              title="整段脚本跑完后等 N 秒，再从头跑一遍；点「停止」结束（录制宏用）"
+            >
+              <input
+                type="checkbox"
+                checked={loopOn}
+                onChange={(e) => {
+                  const v = e.target.checked
+                  setLoopOn(v)
+                  try {
+                    localStorage.setItem('script-loop-on', v ? '1' : '0')
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              />
+              循环
+              <input
+                className="loop-sec"
+                type="number"
+                min={1}
+                max={86400}
+                value={loopSecText}
+                disabled={!loopOn}
+                aria-label="循环间隔（秒）"
+                onChange={(e) => {
+                  setLoopSecText(e.target.value)
+                  try {
+                    localStorage.setItem('script-loop-sec', e.target.value)
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              />
+              秒
+            </label>
             <span className="toolbar-sep" />
             <button className="icon-btn" onClick={onStartRecord} title="录制：在投屏窗口里操作，自动转成脚本代码">
               <IconRecord width={16} height={16} />

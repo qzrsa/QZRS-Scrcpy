@@ -103,10 +103,21 @@ interface RunState {
   name: string
   sessionId: string
   stopped: boolean
+  /** >0 = 整段脚本循环跑，每轮结束后等这么多毫秒（录制宏的"每隔 N 秒执行一次"） */
+  loopMs: number
   /** 挂起的定时器（stop 时提前唤醒） */
   timers: Set<NodeJS.Timeout>
   /** 等待被唤醒的 stop 检查点（stop 时立即触发） */
   wake: Set<() => void>
+}
+
+/** `run()` 的可选参数 */
+export interface RunOptions {
+  /**
+   * 循环间隔（ms）。>0 时把用户代码包进 `while (true) { ... await 间隔 }`，
+   * 直到点「停止」。上限一天，避免手滑写成天文数字。
+   */
+  loopMs?: number
 }
 
 export interface RunningScript {
@@ -171,7 +182,7 @@ export class ScriptEngine {
    * 启动脚本。代码在沙箱 async IIFE 里执行，顶层可 await。
    * 返回 runId；执行结果通过 onEvent 异步汇报（started/log/done/stopped/error）。
    */
-  run(script: Pick<ScriptInfo, 'id' | 'name' | 'code'>, sessionId: string): { runId: string } {
+  run(script: Pick<ScriptInfo, 'id' | 'name' | 'code'>, sessionId: string, opts?: RunOptions): { runId: string } {
     if (this.isScriptRunning(script.id)) {
       throw new Error(`脚本「${script.name}」正在运行中，请先停止`)
     }
@@ -179,6 +190,10 @@ export class ScriptEngine {
     if (code.length === 0) throw new Error('脚本内容为空')
     if (code.length > MAX_CODE_LENGTH) throw new Error(`脚本过长（>${MAX_CODE_LENGTH} 字符）`)
     if (!this.hooks.isSessionAlive(sessionId)) throw new Error('会话不存在或已断开，请先连接设备')
+
+    // 下限 200ms：再短就不是"循环"而是死循环刷指令了（会把设备点乱）。
+    const rawLoop = Number(opts?.loopMs ?? 0)
+    const loopMs = Number.isFinite(rawLoop) && rawLoop > 0 ? Math.max(200, Math.min(86_400_000, Math.floor(rawLoop))) : 0
 
     this.seq += 1
     const runId = `r${Date.now().toString(36)}${this.seq.toString(36)}`
@@ -188,6 +203,7 @@ export class ScriptEngine {
       name: script.name,
       sessionId,
       stopped: false,
+      loopMs,
       timers: new Set(),
       wake: new Set()
     }
@@ -234,15 +250,21 @@ export class ScriptEngine {
 
   /**
    * 从异常栈解析用户脚本行号。
-   * 栈里用户帧形如 `at xxx.js:2:1`；wrapped IIFE 在用户代码前加了 1 行
-   * （`(async () => {`），所以用户看到的行号 = 栈行号 - 1。
+   * 栈里用户帧形如 `at xxx.js:2:1`；外层包装在用户代码前加了若干行
+   * （普通模式 1 行 `(async () => {`；循环模式再加 1 行 `while (true) {`），
+   * 所以用户看到的行号 = 栈行号 - 包装行数。
    * 取**第一个**匹配（栈从内到外，第一个 .js 帧就是最内层的用户调用点）。
    */
-  private parseErrorLine(stack: string): number | undefined {
+  private parseErrorLine(stack: string, wrapperLines = 1): number | undefined {
     const m = /\.js:(\d+):\d+/.exec(stack)
     if (!m) return undefined
-    const line = parseInt(m[1], 10) - 1
+    const line = parseInt(m[1], 10) - wrapperLines
     return line >= 1 ? line : 1
+  }
+
+  /** 包装层在用户代码前插入的行数（循环模式多一行 while） */
+  private static wrapperLines(st: RunState): number {
+    return st.loopMs > 0 ? 2 : 1
   }
 
   /**
@@ -255,14 +277,18 @@ export class ScriptEngine {
     const api = this.buildApi(st)
     const context = vm.createContext(api, { name: `qzrs-script-${st.runId}` })
     try {
+      // 循环模式：整段用户代码当作循环体，每轮之间由 __qzrsLoopTick 等固定间隔。
+      // 用 while(true) 而不是 for，是因为循环次数由用户点「停止」决定。
+      const body =
+        st.loopMs > 0 ? `while (true) {\n${code}\nawait __qzrsLoopTick(${st.loopMs})\n}` : code
       // 包一层 async IIFE：用户代码可以直接顶层 await（vm.Script 本身不支持 TLA）
-      const wrapped = new vm.Script(`(async () => {\n${code}\n})()`, { filename: `${st.name}.js` })
+      const wrapped = new vm.Script(`(async () => {\n${body}\n})()`, { filename: `${st.name}.js` })
       await wrapped.runInContext(context, { timeout: 5000 })
       return st.stopped ? 'stopped' : undefined
     } catch (err) {
       if (st.stopped) return 'stopped'
       const stack = crossRealmStack(err)
-      const line = this.parseErrorLine(stack)
+      const line = this.parseErrorLine(stack, ScriptEngine.wrapperLines(st))
       if (err instanceof ScriptApiError) return { message: err.message, line }
       return { message: `脚本异常 → ${crossRealmMessage(err)}`, line }
     }
@@ -270,6 +296,8 @@ export class ScriptEngine {
 
   /** 构造沙箱上下文：除 API 外不带任何宿主能力 */
   private buildApi(st: RunState): Record<string, unknown> {
+    /** 循环模式已完成的轮数（只用于日志） */
+    let round = 0
     const checkStop = (): void => {
       if (st.stopped) throw new ScriptStoppedError()
       if (!this.hooks.isSessionAlive(st.sessionId)) {
@@ -286,7 +314,7 @@ export class ScriptEngine {
     const guard = <T,>(p: Promise<T>): Promise<T> => {
       p.catch((err) => {
         if (err instanceof ScriptStoppedError || st.stopped) return
-        const line = this.parseErrorLine(crossRealmStack(err))
+        const line = this.parseErrorLine(crossRealmStack(err), ScriptEngine.wrapperLines(st))
         const msg = err instanceof ScriptApiError ? err.message : crossRealmMessage(err)
         this.emit(st, { state: 'log', line: `⚠${line ? ` 第${line}行 ` : ' '}${msg}` })
       })
@@ -452,6 +480,21 @@ export class ScriptEngine {
       key: (name: unknown, duration?: number, metastate?: number): Promise<void> => guard(keyImpl(name, duration, metastate)),
       /** 等待 ms（可被 stop 提前唤醒）。 */
       wait: (ms: unknown): Promise<void> => guard(waitImpl(ms)),
+      /**
+       * 循环模式的轮间隔 —— 内部 API，不进文档、也不给用户脚本主动用。
+       *
+       * 为什么不直接生成 `await wait(ms)`：wait 本身不查 stop，被 stop 唤醒后
+       * 循环会立刻进入下一轮；万一循环体没有别的 API 调用（只有 log），就成了空转刷屏。
+       * 这里在等待前后各查一次 stop，保证点「停止」能真正结束。
+       */
+      __qzrsLoopTick: async (ms: unknown): Promise<void> => {
+        round += 1
+        const sec = Math.round(Number(ms) / 100) / 10
+        this.emit(st, { state: 'log', line: `↻ 第 ${round} 轮完成，${sec} 秒后重来` })
+        checkStop()
+        await sleep(Number(ms))
+        checkStop()
+      },
       /**
        * 截屏找图：等到模板出现在屏幕上为止（或超时）。
        * 用法：const p = await waitImage('start_btn'); if (p.found) await tap(p.x, p.y)

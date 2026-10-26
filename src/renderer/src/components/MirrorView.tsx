@@ -4,6 +4,7 @@ import { H264Player } from '../decoder/h264'
 import type { DecoderAcceleration } from '../decoder/h264'
 import { KEYCODE, META, BUTTON, keycodeFromEventCode, normalizeKeyCode } from '../keycodes'
 import { MIRROR_PADDING, fitContain, hasRealVideoSize, relativeRect } from '../videoFit'
+import { recordGestureLine } from '../recordgesture'
 import type { SessionInfo } from '../store'
 import { KeymapEditor, Crosshair } from './KeymapEditor'
 
@@ -65,6 +66,8 @@ export function MirrorView({
   const mouseDownRef = useRef(false)
   /** 录制用：主键按下时的位置与时间（onPointerUp 时算手势） */
   const recordDownRef = useRef<{ x: number; y: number; time: number } | null>(null)
+  /** 上一次录制动作的结束时刻：用来把两次操作之间的停顿也录成 `await wait(...)` */
+  const recordLastAtRef = useRef(0)
   const metaRef = useRef(0)
   /** per-binding runtime state for `hold` / `repeat` / `view` */
   const bindingStateRef = useRef<Map<string, BindingState>>(new Map())
@@ -163,6 +166,11 @@ export function MirrorView({
   useEffect(() => {
     fitCanvasRef.current = fitCanvas
   }, [fitCanvas])
+
+  // 录制开始时清掉"上一次动作时刻"：第一下操作不该凭空多出一段 wait
+  useEffect(() => {
+    if (recording) recordLastAtRef.current = 0
+  }, [recording])
 
   // stage 尺寸变化（拖窗口 / 进出全屏 / 侧栏开合）与开关切换都要重算画布显示尺寸。
   useEffect(() => {
@@ -670,16 +678,11 @@ export function MirrorView({
     const down = recordDownRef.current
     recordDownRef.current = null
     if (recording && down && onRecordGesture) {
-      const dx = p.x - down.x
-      const dy = p.y - down.y
-      const dist = Math.hypot(dx, dy)
-      const dt = Math.max(30, Date.now() - down.time)
-      const rx = (v: number): number => Math.round(v)
-      if (dist < 24) {
-        onRecordGesture(dt >= 500 ? `await tap(${rx(down.x)}, ${rx(down.y)}, ${dt})` : `await tap(${rx(down.x)}, ${rx(down.y)})`)
-      } else {
-        onRecordGesture(`await swipe(${rx(down.x)}, ${rx(down.y)}, ${rx(p.x)}, ${rx(p.y)}, ${dt})`)
-      }
+      // 间隔/点击/长按/滑动的判定都在 recordGestureLine 里（纯函数，可单测）
+      const g = recordGestureLine({ down, up: p, now: Date.now(), lastAt: recordLastAtRef.current })
+      recordLastAtRef.current = g.at
+      // 一次手势 = 一条记录（有停顿时是两行代码），别让"已录 N 个动作"把 wait 也算成动作
+      onRecordGesture(g.code)
     }
     send({ type: 'touch', action: 1, pointerId: pointerId(e.pointerType), x: p.x, y: p.y, width: p.w, height: p.h, pressure: 0, buttons: 0 })
   }

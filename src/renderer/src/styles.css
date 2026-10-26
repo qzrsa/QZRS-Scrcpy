@@ -1306,6 +1306,50 @@ body.drawer-resizing {
   align-items: center;
 }
 
+/* 循环开关：跟运行按钮挨着，"录完 → 勾循环 → 运行"是一条视线 */
+.loop-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.loop-box.on {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.loop-box input[type='checkbox'] {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.loop-sec {
+  width: 44px;
+  padding: 1px 3px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  text-align: center;
+}
+
+.loop-sec:disabled {
+  opacity: 0.45;
+}
+
 .script-name-wrap .text-input {
   width: 100%;
   padding-right: 22px;

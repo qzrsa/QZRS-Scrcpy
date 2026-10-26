@@ -130,9 +130,12 @@ const api = {
     ipcRenderer.invoke('scripts:save', id, name, code),
   deleteScript: (id: string): Promise<{ ok: boolean; scripts?: ScriptInfo[]; message?: string }> =>
     ipcRenderer.invoke('scripts:delete', id),
-  /** 运行脚本：传目标会话 sessionId（投屏开着才有会话） */
-  runScript: (scriptId: string, sessionId: string): Promise<{ ok: boolean; runId?: string; message?: string }> =>
-    ipcRenderer.invoke('scripts:run', scriptId, sessionId),
+  /**
+   * 运行脚本：传目标会话 sessionId（投屏开着才有会话）。
+   * `loopMs > 0` = 跑完一轮后等这么久再从头跑，直到停止（录制宏用）。
+   */
+  runScript: (scriptId: string, sessionId: string, loopMs = 0): Promise<{ ok: boolean; runId?: string; message?: string }> =>
+    ipcRenderer.invoke('scripts:run', scriptId, sessionId, loopMs),
   stopScript: (runId: string): Promise<OpResult> => ipcRenderer.invoke('scripts:stop', runId),
   runningScripts: (): Promise<Array<{ runId: string; scriptId: string; name: string; sessionId: string }>> =>
     ipcRenderer.invoke('scripts:running'),
