@@ -208,11 +208,16 @@ export function viewLine(
 
 /**
  * 摇杆（WASD 这类 groupId 绑定）：按住期间每个方向只是往同一根手指上叠向量，
- * 抬手时才是一个完整动作。
+ * 抬手时才是一个完整动作 → 录成一行 `stick(中心, 方向点, 按住时长)`。
  *
- * ⚠️ 不能录成 `tap(方向点, 时长)`：游戏里的虚拟摇杆大多在 **DOWN 时把落点当成摇杆原点**，
- * 方向要等 MOVE 才算 —— 直接在方向点上按一下，位移恒为 0，回放就是"没反应"。
- * 所以必须照实时操作的顺序来：按在摇杆中心 → 推到方向 → 按住 → 抬起。
+ * ⚠️ 两个坑，缺一个就"回放人物不走"：
+ *   1. 不能录成 `tap(方向点, 时长)` —— 游戏在 DOWN 时把**落点当摇杆原点**，
+ *      方向要等 MOVE 才算，直接在方向点上按一下位移恒为 0；
+ *   2. 不能录成「touchDown + 一次 touchMove + wait」—— DOWN 与 MOVE 落在同一个
+ *      输入帧会被合并，而且手指不动的那几百毫秒游戏收不到 MOVE，人物立刻停。
+ *
+ * 所以交给引擎的 stick() 按实时摇杆的时序重放：DOWN(中心) → 跨一帧 → MOVE(方向点)
+ * → 每 33ms 续一次 MOVE → UP。细节见 scriptengine.ts 的 stickImpl。
  */
 export function stickLine(
   o: Common & {
@@ -228,15 +233,12 @@ export function stickLine(
   const cy = px(o.centerY, o.videoH)
   const ox = px(o.centerX + o.dx, o.videoW)
   const oy = px(o.centerY + o.dy, o.videoH)
-  const hold = Math.max(0, o.now - o.downAt)
+  const held = Math.max(0, o.now - o.downAt)
+  // 50ms 取整；短于 50ms 的小抖动不写时长（stick 默认 0 = 只推一次方向点）
+  const hold = held < 50 ? 0 : Math.round(held / 50) * 50
   const gap = o.lastAt > 0 ? o.downAt - o.lastAt : 0
-
-  const body = [`await touchDown(${cx}, ${cy})`, `await touchMove(${ox}, ${oy})`]
-  // 按住 ≥200ms 才值得写一行 wait（和手势/键盘同一套阈值）
-  if (hold >= KEY_HOLD_MIN_MS) body.push(`await wait(${Math.max(50, Math.round(hold / 50) * 50)})`)
-  body.push('await touchUp()')
-
-  return { code: join(recordGapLine(gap), body.join('\n')), at: o.now }
+  const call = `await stick(${cx}, ${cy}, ${ox}, ${oy}${hold ? `, ${hold}` : ''})`
+  return { code: join(recordGapLine(gap), call), at: o.now }
 }
 
 export interface RecordKeyOpts extends Omit<Common, 'now'> {

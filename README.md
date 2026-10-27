@@ -15,7 +15,7 @@
 | 屏幕 | 截屏、录屏（screenrecord）、旋转 |
 | 剪贴板 | 双向同步 / 手动发送粘贴 |
 | 按键映射 | 自定义键盘 → tap/swipe/keycode 映射，可视化录制 |
-| 脚本自动化 | 用 JS 编写 tap/swipe/text/key/wait 动作序列自动执行（[脚本编写指南](docs/script-guide.md)）。另有 **Python 脚本桥**：设置里开启后，外部 Python 脚本（仅标准库）可通过本地 HTTP 接口对当前投屏会话发送点按/滑动/按键/文本/截屏指令，并支持**多指并行触摸**（按住开火的同时点跳跃），与 JS 引擎共用同一条 scrcpy 控制链路（仅监听 127.0.0.1 + Token 鉴权，客户端库与示例在 `%APPDATA%\qzrs-scrcpy\data\bridge\`，[Python 桥文档](docs/python-bridge.md)） |
+| 脚本自动化 | 用 JS 编写 tap/swipe/stick/text/key/wait 动作序列自动执行（[脚本编写指南](docs/script-guide.md)）。另有 **Python 脚本桥**：设置里开启后，外部 Python 脚本（仅标准库）可通过本地 HTTP 接口对当前投屏会话发送点按/滑动/按键/文本/截屏指令，并支持**多指并行触摸**（按住开火的同时点跳跃），与 JS 引擎共用同一条 scrcpy 控制链路（仅监听 127.0.0.1 + Token 鉴权，客户端库与示例在 `%APPDATA%\qzrs-scrcpy\data\bridge\`，[Python 桥文档](docs/python-bridge.md)） |
 | 工具 | ADB Shell 终端、文件推送/拉取（设备文件管理器里可浏览/上传/下载/删除，支持**批量多选**后一次性移动/复制/删除，删除一律二次确认）；**把文件直接拖进投屏画面 = 推到手机的 `/sdcard/Download`**（与官方 scrcpy 的拖放上传一致，支持多文件与文件夹，APK 也走这条路） |
 | 设备发现 | 局域网 5555 端口扫描：快扫（物理网卡 + 回环，~0.85s）/ 深度扫描（全部网卡网段 + 设置里手填的额外网段）。跨 VLAN、设备挂在另一台路由器下时，可在设置里填任意 CIDR 或单 IP（最多 4096 个地址） |
 | 设置 | 分辨率/码率/帧率、编码器、主题、常亮/触摸显示等 |

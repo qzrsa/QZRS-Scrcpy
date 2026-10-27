@@ -135,6 +135,10 @@ export interface RunningScript {
 const MAX_CODE_LENGTH = 100_000
 /** swipe 的 MOVE 插值步长（ms/步）：~16ms 接近满帧率，协议不会丢中间点 */
 const SWIPE_STEP_MS = 16
+/** stick 按下之后隔多久才推方向（ms）：必须跨过一个输入帧，否则 DOWN/MOVE 会被合并 */
+const STICK_SETTLE_MS = 40
+/** stick 按住期间重发 MOVE 的心跳（ms）：与实时摇杆 setInterval(33) 一致 */
+const STICK_TICK_MS = 33
 
 /** Omit 在联合类型上会塌缩成公共键，这里分发处理（每个成员各自 omit） */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
@@ -467,6 +471,55 @@ export class ScriptEngine {
       checkStop()
     }
 
+    /**
+     * 摇杆一招做完：DOWN 在中心 → 隔一帧 → MOVE 到方向点 → 每 33ms 续 MOVE → UP。
+     *
+     * 为什么不拿 touchDown/touchMove/touchUp 拼：实时摇杆（键位映射的 WASD）是
+     * 「DOWN 中心 + setInterval(33ms) 持续 MOVE」，这两点缺一不可 ——
+     *   1. DOWN 与 MOVE 落在同一个输入帧：Unity 侧只报一次 Began 且位置已经是方向点，
+     *      游戏把落点当摇杆原点 ⇒ 位移恒 0（就是「录制的 WASD 人物不走」）；
+     *   2. 推到位之后不发 MOVE：手指不动的那几百毫秒游戏收不到任何事件，
+     *      Moved 不触发 ⇒ 人物立刻停下。
+     */
+    const stickImpl = async (
+      cx: unknown,
+      cy: unknown,
+      dirX: unknown,
+      dirY: unknown,
+      holdMs = 0
+    ): Promise<void> => {
+      checkStop()
+      if (st.finger) throw new ScriptApiError('手指还按着（先 touchUp() 再用 stick）')
+      const ax = pos(cx, 'x1')
+      const ay = pos(cy, 'y1')
+      const bx = pos(dirX, 'x2')
+      const by = pos(dirY, 'y2')
+      const hold = Math.min(60_000, Math.max(0, Number(holdMs) || 0))
+
+      touch(0, ax, ay, 1) // DOWN：按在摇杆中心，游戏以这里为原点
+      st.finger = { x: ax, y: ay }
+      await sleep(STICK_SETTLE_MS) // 跨帧，别让 DOWN 和 MOVE 挤进同一帧
+      st.finger = { x: bx, y: by }
+      touch(2, bx, by, 1) // 第一次推出方向
+
+      const ticks = Math.floor(hold / STICK_TICK_MS)
+      for (let i = 0; i < ticks; i++) {
+        await sleep(STICK_TICK_MS)
+        if (st.stopped) {
+          st.finger = null
+          touch(1, bx, by, 0) // 停止时也要把手指抬起来
+          throw new ScriptStoppedError()
+        }
+        touch(2, bx, by, 1) // 按住期间持续发 MOVE，等价于实时摇杆的 33ms 心跳
+      }
+      const rest = hold - ticks * STICK_TICK_MS
+      if (rest > 0) await sleep(rest)
+
+      st.finger = null
+      touch(1, bx, by, 0) // UP
+      checkStop()
+    }
+
     const keyImpl = async (name: unknown, duration = 30, metastate = 0): Promise<void> => {
       checkStop()
       const keycode = resolveKeycode(name as string | number)
@@ -554,12 +607,22 @@ export class ScriptEngine {
        *   await wait(800)              // 一直推着
        *   await touchUp()
        * 引擎在脚本结束/报错/被停止时会自动抬手，不会把手指卡在屏幕上。
+       * ⚠️ 推摇杆请用 stick()：它会在 DOWN 之后跨一帧再推，并在按住期间持续发 MOVE；
+       *    手写的「DOWN + 一次 MOVE + wait」Game 侧多半收不到持续拖动。
        */
       touchDown: (x: unknown, y: unknown): Promise<void> => guard(touchDownImpl(x, y)),
       /** 移动已按下的手指（必须先 touchDown）。 */
       touchMove: (x: unknown, y: unknown): Promise<void> => guard(touchMoveImpl(x, y)),
       /** 抬起手指（幂等）。 */
       touchUp: (): Promise<void> => guard(touchUpImpl()),
+      /**
+       * 推摇杆：(xc,yc) 是摇杆中心，(xd,yd) 是推到的方向点，holdMs 是保持多久。
+       *   await stick(540, 1200, 430, 1000, 800)   // 中心 → 左上，推住 0.8 秒
+       * 内部：DOWN(中心) → 隔一帧 → MOVE(方向点) → 每 33ms 续 MOVE → UP。
+       * 直接 tap(方向点) 是错的（游戏拿落点当原点，位移恒 0），所以摇杆只认这个 API。
+       */
+      stick: (x1: unknown, y1: unknown, x2: unknown, y2: unknown, holdMs?: number): Promise<void> =>
+        guard(stickImpl(x1, y1, x2, y2, holdMs)),
       /** 等待 ms（可被 stop 提前唤醒）。 */
       wait: (ms: unknown): Promise<void> => guard(waitImpl(ms)),
       /**
