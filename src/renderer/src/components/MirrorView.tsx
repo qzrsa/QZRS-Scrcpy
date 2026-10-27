@@ -627,8 +627,11 @@ export function MirrorView({
     if (!recordingRef.current) return
     const emit = onRecordKeyRef.current
     if (!emit) return
-    // 修饰键单独按不录（折进下一个键的 metastate）；按住时的系统重复也不录
-    if (MODIFIER_CODES.has(e.code)) return
+    // 没命中映射的修饰键不单独录：它们的作用已经折进下一个键的 metastate
+    //（Ctrl+E → key('E', 0, 4096)），再录一条 CTRL_LEFT 反而会让脚本多按一个键。
+    // 但如果修饰键**有映射**（比如把 Ctrl 映射成游戏里的技能键），那是用户特意配的
+    // 动作，必须照录——所以这里要用 binding 判断，不能只看键名。
+    if (!binding && MODIFIER_CODES.has(e.code)) return
     if (phase === 'down' && e.repeat) return
 
     const canvas = canvasRef.current
