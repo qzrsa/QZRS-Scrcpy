@@ -1606,6 +1606,19 @@ body.drawer-resizing {
   white-space: nowrap;
 }
 
+/* 最近一条脚本日志（循环倒计时就在这里）：面板关掉后只剩它能说明"还活着" */
+.run-bar-log {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 240px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .run-dot {
   flex: none;
   width: 10px;

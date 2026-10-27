@@ -45,6 +45,12 @@ export default function App(): JSX.Element {
    * 投屏区顶部常驻一条「脚本运行中 · 停止」。
    */
   const [scriptRuns, setScriptRuns] = useState<{ runId: string; scriptId: string; name: string }[]>([])
+  /**
+   * 最近一条脚本日志（只用于投屏区那条常驻提示）。
+   * 循环间隔几十秒到一小时时，面板关掉就只剩这条条了 —— 带它用户才能判断
+   * "还在等"还是"已经死了"（引擎每 5 分钟打一行倒计时）。
+   */
+  const [scriptLog, setScriptLog] = useState('')
   /** Python 脚本同理：面板关掉后也要能停（它们是独立进程，更需要这个入口） */
   const [pyRuns, setPyRuns] = useState<{ runId: string; name: string }[]>([])
   const [netStats, setNetStats] = useState<SessionStats | null>(null)
@@ -60,6 +66,9 @@ export default function App(): JSX.Element {
   // ---- 脚本运行状态：App 常驻订阅，面板开关不影响 ----
   useEffect(() => {
     const off = window.api.onScriptEvent((e) => {
+      if (e.state === 'log') setScriptLog(e.line)
+      else if (e.state === 'started') setScriptLog('')
+      else if (e.state === 'done' || e.state === 'stopped' || e.state === 'error') setScriptLog('')
       setScriptRuns((prev) => {
         if (e.state === 'started') {
           return prev.some((r) => r.runId === e.runId) ? prev : [...prev, { runId: e.runId, scriptId: e.scriptId, name: e.name }]
@@ -452,6 +461,11 @@ export default function App(): JSX.Element {
                   </>
                 )}
               </span>
+              {scriptRuns.length > 0 && scriptLog && (
+                <span className="run-bar-log" title={scriptLog}>
+                  {scriptLog}
+                </span>
+              )}
               <button className="btn btn-danger btn-sm" onClick={stopAllScripts} title="停止所有正在运行的脚本">
                 停止
               </button>

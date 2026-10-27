@@ -140,6 +140,27 @@ const STICK_SETTLE_MS = 40
 /** stick 按住期间重发 MOVE 的心跳（ms）：与实时摇杆 setInterval(33) 一致 */
 const STICK_TICK_MS = 33
 
+const pad2 = (n: number): string => String(n).padStart(2, '0')
+
+/** 墙钟 HH:mm:ss —— 循环日志里带上它，用户能直接对着表看 */
+function clockOf(t: number): string {
+  const d = new Date(t)
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`
+}
+
+/** 时长口语化：45 秒 / 50 分 / 1 小时 40 分；不足 1 秒直接给毫秒（循环下限 200ms） */
+function durText(ms: number): string {
+  const raw = Math.max(0, ms)
+  if (raw < 1000) return `${Math.round(raw)} 毫秒`
+  const total = Math.round(raw / 1000)
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  if (h > 0) return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`
+  if (m > 0) return s > 0 ? `${m} 分 ${s} 秒` : `${m} 分`
+  return `${s} 秒`
+}
+
 /** Omit 在联合类型上会塌缩成公共键，这里分发处理（每个成员各自 omit） */
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 type ScriptRunEventPartial = DistributiveOmit<ScriptRunEvent, 'runId' | 'scriptId' | 'name'>
@@ -164,6 +185,16 @@ function crossRealmMessage(err: unknown): string {
 }
 
 export class ScriptEngine {
+  /**
+   * 循环等待的切段长度（ms）。长等待必须切成小段：
+   * 一次性 setTimeout(50 分钟) 在系统睡眠/休眠期间会被冻结，唤醒后还要把剩余时间
+   * 走完，等于"到点不执行"；切段后每段都按**墙上时钟**重新算剩余，醒来即到点。
+   * 顺带每段都能查一次 stop，长等待期点「停止」不会拖到下一轮。
+   */
+  static LOOP_SLICE_MS = 30_000
+  /** 循环等待的心跳日志间隔（ms）：45 分钟一片安静的话，用户分不清"在等"和"已经死了" */
+  static LOOP_BEAT_MS = 5 * 60_000
+
   private runs = new Map<string, RunState>()
   private seq = 0
 
@@ -628,17 +659,39 @@ export class ScriptEngine {
       /**
        * 循环模式的轮间隔 —— 内部 API，不进文档、也不给用户脚本主动用。
        *
-       * 为什么不直接生成 `await wait(ms)`：wait 本身不查 stop，被 stop 唤醒后
-       * 循环会立刻进入下一轮；万一循环体没有别的 API 调用（只有 log），就成了空转刷屏。
-       * 这里在等待前后各查一次 stop，保证点「停止」能真正结束。
+       * 实现要点（都是踩过的坑）：
+       *   1. 不能直接 `await wait(ms)`：wait 被 stop 唤醒后循环会立刻进下一轮；
+       *   2. 不能用一次长 setTimeout：系统睡眠/休眠会冻结定时器，50 分钟的空档变成
+       *      "永远等不到"（用户实测 3000/6000 秒一轮，1 小时后没动静就是这个）；
+       *   3. 长等待必须有心跳日志，否则用户无法判断脚本还活着。
+       * 所以：记住目标墙钟时间 → 每 30 秒（或剩余时间，取小）醒一次 → 查 stop、
+       * 按墙钟重算剩余 → 每 5 分钟打一行倒计时。
        */
       __qzrsLoopTick: async (ms: unknown): Promise<void> => {
         round += 1
-        const sec = Math.round(Number(ms) / 100) / 10
-        this.emit(st, { state: 'log', line: `↻ 第 ${round} 轮完成，${sec} 秒后重来` })
+        const wait = Math.max(0, Number(ms) || 0)
+        const nextAt = Date.now() + wait
+        this.emit(st, {
+          state: 'log',
+          line: `↻ 第 ${round} 轮完成，${durText(wait)}后重来（约 ${clockOf(nextAt)}）`
+        })
         checkStop()
-        await sleep(Number(ms))
-        checkStop()
+
+        let beatAt = Date.now() + ScriptEngine.LOOP_BEAT_MS
+        for (;;) {
+          const left = nextAt - Date.now()
+          if (left <= 0) break
+          await sleep(Math.min(ScriptEngine.LOOP_SLICE_MS, left))
+          checkStop()
+          if (Date.now() >= beatAt) {
+            this.emit(st, {
+              state: 'log',
+              line: `⏳ 距第 ${round + 1} 轮还有 ${durText(nextAt - Date.now())}（${clockOf(nextAt)}）`
+            })
+            beatAt = Date.now() + ScriptEngine.LOOP_BEAT_MS
+          }
+        }
+        this.emit(st, { state: 'log', line: `▶ 第 ${round + 1} 轮开始（${clockOf(Date.now())}）` })
       },
       /**
        * 截屏找图：等到模板出现在屏幕上为止（或超时）。
