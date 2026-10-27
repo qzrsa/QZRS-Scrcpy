@@ -168,6 +168,29 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
     onRecordedConsumed()
   }, [recordedCode, onRecordedConsumed])
 
+  // 面板可能在脚本运行时被关掉再打开：`started` 事件早就发过了，本地 runsRef 是空的
+  // → 按钮会显示「运行」而不是「停止」，用户就没法停了。主进程才是运行状态的唯一真相，
+  //   每次挂载都拉一次。（2026-10-27 用户报「运行后没法停止」就是这条）
+  const syncRuns = useCallback(async (): Promise<void> => {
+    try {
+      const list = await window.api.runningScripts()
+      const runs = runsRef.current
+      for (const r of list) {
+        if (!runs.has(r.runId)) runs.set(r.runId, { scriptId: r.scriptId, state: 'running', startedAt: Date.now() })
+      }
+      // 主进程说没在跑的一律清掉：面板关着的时候 stopped 事件也丢了
+      const alive = new Set(list.map((r) => r.runId))
+      for (const [id, r] of [...runs]) if (r.state === 'running' && !alive.has(id)) runs.delete(id)
+      setRunningIds(new Set([...runs.values()].filter((r) => r.state === 'running').map((r) => r.scriptId)))
+    } catch {
+      /* 拉不到就维持现状，不影响运行/停止主流程 */
+    }
+  }, [])
+
+  useEffect(() => {
+    void syncRuns()
+  }, [syncRuns])
+
   // 脚本运行事件 → 日志区 + 运行状态
   useEffect(() => {
     const off = window.api.onScriptEvent((e: ScriptRunEvent) => {
@@ -294,6 +317,9 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
 
   const run = async (): Promise<void> => {
     if (!sessionId) return
+    // ⚠️ 不能直接读 selectedId：新建脚本时它是 null，保存后才拿到 id，
+    // 而 setSelectedId 是异步的 —— 用旧值 run 会静默什么都不做。
+    let target = selectedId
     if (dirty) {
       const r = await window.api.saveScript(selectedId ?? '', name, code)
       if (!r.ok) {
@@ -303,17 +329,27 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
       setScripts(r.scripts ?? [])
       setSelectedId(r.id!)
       setDirty(false)
+      target = r.id ?? target
     }
-    const target = selectedId
     if (!target) return
     const r = await window.api.runScript(target, sessionId, loopMs)
     if (!r.ok) onToast(r.message || '运行失败', 'error')
     else if (loopMs > 0) onToast(`开始循环：每 ${loopMs / 1000} 秒执行一遍，点停止结束`, 'info')
+    void syncRuns()
   }
 
-  const stop = (): void => {
-    for (const [runId, r] of runsRef.current) {
-      if (r.scriptId === selectedId && r.state === 'running') void window.api.stopScript(runId)
+  const stop = async (): Promise<void> => {
+    const hits = [...runsRef.current].filter(([, r]) => r.scriptId === selectedId && r.state === 'running')
+    if (hits.length > 0) {
+      for (const [runId] of hits) void window.api.stopScript(runId)
+      return
+    }
+    // 本地没有记录（面板是运行中途才打开的）→ 直接问主进程要 runId
+    try {
+      const list = await window.api.runningScripts()
+      for (const r of list) if (r.scriptId === selectedId) void window.api.stopScript(r.runId)
+    } catch {
+      /* 拉不到就算了，至少不会把面板卡住 */
     }
   }
 
@@ -573,7 +609,7 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
               保存
             </button>
             {runningThis ? (
-              <button className="btn btn-danger" onClick={stop}>
+              <button className="btn btn-danger" onClick={() => void stop()}>
                 <IconStop width={15} height={15} /> 停止
               </button>
             ) : (

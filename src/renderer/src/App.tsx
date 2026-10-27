@@ -39,6 +39,14 @@ export default function App(): JSX.Element {
   const [scriptRecording, setScriptRecording] = useState(false)
   const [recordLines, setRecordLines] = useState<string[]>([])
   const [recordedCode, setRecordedCode] = useState<string | null>(null)
+  /**
+   * 正在跑的脚本（App 级）：脚本面板是个抽屉，关掉之后面板里的运行状态就没了，
+   * 用户会「找不到停止按钮」——所以运行状态必须由常驻的 App 持有，
+   * 投屏区顶部常驻一条「脚本运行中 · 停止」。
+   */
+  const [scriptRuns, setScriptRuns] = useState<{ runId: string; scriptId: string; name: string }[]>([])
+  /** Python 脚本同理：面板关掉后也要能停（它们是独立进程，更需要这个入口） */
+  const [pyRuns, setPyRuns] = useState<{ runId: string; name: string }[]>([])
   const [netStats, setNetStats] = useState<SessionStats | null>(null)
   const [renderStats, setRenderStats] = useState<{ renderFps: number; hardware: boolean } | null>(null)
   // ---- 自更新：主进程推快照，渲染层只读（不自己拼状态）----
@@ -47,6 +55,63 @@ export default function App(): JSX.Element {
   useEffect(() => {
     void window.api.getUpdateState().then(setUpdateSnap).catch(() => undefined)
     return window.api.onUpdateState(setUpdateSnap)
+  }, [])
+
+  // ---- 脚本运行状态：App 常驻订阅，面板开关不影响 ----
+  useEffect(() => {
+    const off = window.api.onScriptEvent((e) => {
+      setScriptRuns((prev) => {
+        if (e.state === 'started') {
+          return prev.some((r) => r.runId === e.runId) ? prev : [...prev, { runId: e.runId, scriptId: e.scriptId, name: e.name }]
+        }
+        if (e.state === 'done' || e.state === 'stopped' || e.state === 'error') {
+          return prev.filter((r) => r.runId !== e.runId)
+        }
+        return prev
+      })
+    })
+    // 窗口重载 / 脚本在别处启动过 → 以主进程为准补一次
+    void window.api
+      .runningScripts()
+      .then((list) => setScriptRuns(list.map((r) => ({ runId: r.runId, scriptId: r.scriptId, name: r.name }))))
+      .catch(() => undefined)
+    return off
+  }, [])
+
+  // ---- Python 脚本运行状态：同样常驻订阅 ----
+  useEffect(() => {
+    const off = window.api.onPyScriptEvent((e) => {
+      setPyRuns((prev) => {
+        if (e.state === 'started') {
+          return prev.some((r) => r.runId === e.runId) ? prev : [...prev, { runId: e.runId, name: e.name }]
+        }
+        if (e.state === 'done' || e.state === 'stopped' || e.state === 'error') {
+          return prev.filter((r) => r.runId !== e.runId)
+        }
+        return prev
+      })
+    })
+    void window.api
+      .runningPyScripts()
+      .then((list) => setPyRuns(list.map((r) => ({ runId: r.runId, name: r.name }))))
+      .catch(() => undefined)
+    return off
+  }, [])
+
+  /** 一键停掉所有在跑的脚本：以主进程列表为准，不依赖渲染层可能过期的状态 */
+  const stopAllScripts = useCallback((): void => {
+    void window.api
+      .runningScripts()
+      .then((list) => {
+        for (const r of list) void window.api.stopScript(r.runId)
+      })
+      .catch(() => undefined)
+    void window.api
+      .runningPyScripts()
+      .then((list) => {
+        for (const r of list) void window.api.stopPyScript(r.runId)
+      })
+      .catch(() => undefined)
   }, [])
 
   // 上次更新结果只报一次：主进程用 settings.lastUpdateNotice 去重，跨重启也不会重复弹
@@ -366,6 +431,31 @@ export default function App(): JSX.Element {
 
           {activeSession && statsOpen && (
             <StatsOverlay session={activeSession} transport={activeTransport} net={netStats} render={renderStats} />
+          )}
+
+          {/* 脚本运行中：面板关掉也能停（关抽屉后原来没有任何停止入口） */}
+          {(scriptRuns.length > 0 || pyRuns.length > 0) && (
+            <div className={`run-bar ${scriptRecording ? 'lower' : ''}`}>
+              <span className="run-dot" />
+              <span className="run-bar-text">
+                {scriptRuns.length > 0 && (
+                  <>
+                    脚本运行中
+                    {scriptRuns.length > 1 ? `（${scriptRuns.length} 个）` : `：${scriptRuns[0].name}`}
+                  </>
+                )}
+                {scriptRuns.length > 0 && pyRuns.length > 0 && ' · '}
+                {pyRuns.length > 0 && (
+                  <>
+                    Python 运行中
+                    {pyRuns.length > 1 ? `（${pyRuns.length} 个）` : `：${pyRuns[0].name}`}
+                  </>
+                )}
+              </span>
+              <button className="btn btn-danger btn-sm" onClick={stopAllScripts} title="停止所有正在运行的脚本">
+                停止
+              </button>
+            </div>
           )}
 
           {scriptRecording && (

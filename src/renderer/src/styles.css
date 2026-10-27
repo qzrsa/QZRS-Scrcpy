@@ -1575,6 +1575,51 @@ body.drawer-resizing {
   color: var(--text);
 }
 
+/* ===== 脚本运行中提示（面板关掉也能停） ===== */
+.run-bar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--green);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  color: var(--text);
+  max-width: min(80%, 560px);
+}
+
+/* 录制条也在顶部：两个都在时把运行条压下去一点，别叠在一起 */
+.run-bar.lower {
+  top: 56px;
+}
+
+.run-bar-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: run-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes run-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
 .record-dot {
   width: 10px;
   height: 10px;
