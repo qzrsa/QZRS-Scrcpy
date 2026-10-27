@@ -109,6 +109,11 @@ interface RunState {
   timers: Set<NodeJS.Timeout>
   /** 等待被唤醒的 stop 检查点（stop 时立即触发） */
   wake: Set<() => void>
+  /**
+   * 当前按着的手指（touchDown 之后、touchUp 之前）。
+   * 脚本结束/报错/被停止时必须由引擎负责抬起，否则设备上会留下一根"死死按住"的手指。
+   */
+  finger: { x: number; y: number } | null
 }
 
 /** `run()` 的可选参数 */
@@ -205,7 +210,8 @@ export class ScriptEngine {
       stopped: false,
       loopMs,
       timers: new Set(),
-      wake: new Set()
+      wake: new Set(),
+      finger: null
     }
     this.runs.set(runId, st)
     this.emit(st, { state: 'started', sessionId })
@@ -291,6 +297,33 @@ export class ScriptEngine {
       const line = this.parseErrorLine(stack, ScriptEngine.wrapperLines(st))
       if (err instanceof ScriptApiError) return { message: err.message, line }
       return { message: `脚本异常 → ${crossRealmMessage(err)}`, line }
+    } finally {
+      // 手指没抬就结束（报错/停止/用户忘了 touchUp）→ 引擎兜底抬起
+      this.liftFinger(st)
+    }
+  }
+
+  /** 把手上的手指抬起来（幂等，视频没就绪或会话已断都静默跳过） */
+  private liftFinger(st: RunState): void {
+    const f = st.finger
+    if (!f) return
+    st.finger = null
+    try {
+      const s = this.hooks.getVideoSize(st.sessionId)
+      if (!s || s.width <= 0 || s.height <= 0) return
+      this.hooks.sendControl(st.sessionId, {
+        type: 'touch',
+        action: 1,
+        pointerId: 'finger',
+        x: Math.max(0, Math.round(f.x)),
+        y: Math.max(0, Math.round(f.y)),
+        width: s.width,
+        height: s.height,
+        pressure: 0,
+        buttons: 0
+      })
+    } catch {
+      /* 会话没了就算了，不能让清理动作把引擎带崩 */
     }
   }
 
@@ -369,6 +402,8 @@ export class ScriptEngine {
 
     const tapImpl = async (x: unknown, y: unknown, duration = 60): Promise<void> => {
       checkStop()
+      // 手指还按着时不能再 tap：同一个 pointerId 再发 DOWN 是非法指令，设备侧状态会乱
+      if (st.finger) throw new ScriptApiError('手指还按着（touchDown 之后要先 touchUp），不能接着 tap/swipe')
       const px = pos(x, 'x')
       const py = pos(y, 'y')
       const d = Math.max(0, Number(duration) || 0)
@@ -380,6 +415,7 @@ export class ScriptEngine {
 
     const swipeImpl = async (x1: unknown, y1: unknown, x2: unknown, y2: unknown, duration = 300): Promise<void> => {
       checkStop()
+      if (st.finger) throw new ScriptApiError('手指还按着（touchDown 之后要先 touchUp），不能接着 tap/swipe')
       const ax = pos(x1, 'x1')
       const ay = pos(y1, 'y1')
       const bx = pos(x2, 'x2')
@@ -396,6 +432,39 @@ export class ScriptEngine {
         touch(2, ax + ((bx - ax) * i) / steps, ay + ((by - ay) * i) / steps, 1) // MOVE
       }
       touch(1, bx, by, 0) // UP
+    }
+
+    /**
+     * 底层三段式触控：touchDown → touchMove* → touchUp。
+     *
+     * 为什么需要：不少游戏（尤其虚拟摇杆）在 DOWN 时把**落点当成摇杆原点**，
+     * 方向要等 MOVE 才计算 —— 于是「直接在方向点上按一下」永远算出零位移
+     * （录制的 WASD 回放没反应就是这个原因）。必须先按中心，再推到方向。
+     */
+    const touchDownImpl = async (x: unknown, y: unknown): Promise<void> => {
+      checkStop()
+      if (st.finger) throw new ScriptApiError('手指还按着（上一次 touchDown 没配 touchUp），先 touchUp() 再按')
+      const px = pos(x, 'x')
+      const py = pos(y, 'y')
+      touch(0, px, py, 1)
+      st.finger = { x: px, y: py }
+    }
+
+    const touchMoveImpl = async (x: unknown, y: unknown): Promise<void> => {
+      checkStop()
+      if (!st.finger) throw new ScriptApiError('还没按下手指 —— 先 touchDown(x, y)')
+      const px = pos(x, 'x')
+      const py = pos(y, 'y')
+      touch(2, px, py, 1)
+      st.finger = { x: px, y: py }
+    }
+
+    const touchUpImpl = async (): Promise<void> => {
+      const f = st.finger
+      st.finger = null
+      if (!f) return // 幂等：没按着就当无事发生，脚本收尾里可以放心调用
+      touch(1, f.x, f.y, 0) // 先抬手指，再查 stop（否则停止时手指会卡在屏幕上）
+      checkStop()
     }
 
     const keyImpl = async (name: unknown, duration = 30, metastate = 0): Promise<void> => {
@@ -478,6 +547,19 @@ export class ScriptEngine {
       },
       /** 按键：key('BACK') / key(4) / key('BACK', 500)=长按 500ms / key('A', 0, metastate) 组合键。 */
       key: (name: unknown, duration?: number, metastate?: number): Promise<void> => guard(keyImpl(name, duration, metastate)),
+      /**
+       * 按下手指（不抬起）。配合 touchMove / touchUp 用：
+       *   await touchDown(540, 1200)   // 按在摇杆中心
+       *   await touchMove(430, 1000)   // 推到左上
+       *   await wait(800)              // 一直推着
+       *   await touchUp()
+       * 引擎在脚本结束/报错/被停止时会自动抬手，不会把手指卡在屏幕上。
+       */
+      touchDown: (x: unknown, y: unknown): Promise<void> => guard(touchDownImpl(x, y)),
+      /** 移动已按下的手指（必须先 touchDown）。 */
+      touchMove: (x: unknown, y: unknown): Promise<void> => guard(touchMoveImpl(x, y)),
+      /** 抬起手指（幂等）。 */
+      touchUp: (): Promise<void> => guard(touchUpImpl()),
       /** 等待 ms（可被 stop 提前唤醒）。 */
       wait: (ms: unknown): Promise<void> => guard(waitImpl(ms)),
       /**

@@ -208,8 +208,11 @@ export function viewLine(
 
 /**
  * 摇杆（WASD 这类 groupId 绑定）：按住期间每个方向只是往同一根手指上叠向量，
- * 抬手时才是一个完整动作。脚本没有多点触控，所以录成"在合力方向的偏移点上按住
- * 这么久"——游戏按触点相对摇杆中心的偏移算力度，效果等价。
+ * 抬手时才是一个完整动作。
+ *
+ * ⚠️ 不能录成 `tap(方向点, 时长)`：游戏里的虚拟摇杆大多在 **DOWN 时把落点当成摇杆原点**，
+ * 方向要等 MOVE 才算 —— 直接在方向点上按一下，位移恒为 0，回放就是"没反应"。
+ * 所以必须照实时操作的顺序来：按在摇杆中心 → 推到方向 → 按住 → 抬起。
  */
 export function stickLine(
   o: Common & {
@@ -221,16 +224,19 @@ export function stickLine(
     videoH: number
   }
 ): RecordedGesture {
-  return tapLine({
-    downAt: o.downAt,
-    lastAt: o.lastAt,
-    now: o.now,
-    x: o.centerX + o.dx,
-    y: o.centerY + o.dy,
-    holdMs: Math.max(0, o.now - o.downAt),
-    videoW: o.videoW,
-    videoH: o.videoH
-  })
+  const cx = px(o.centerX, o.videoW)
+  const cy = px(o.centerY, o.videoH)
+  const ox = px(o.centerX + o.dx, o.videoW)
+  const oy = px(o.centerY + o.dy, o.videoH)
+  const hold = Math.max(0, o.now - o.downAt)
+  const gap = o.lastAt > 0 ? o.downAt - o.lastAt : 0
+
+  const body = [`await touchDown(${cx}, ${cy})`, `await touchMove(${ox}, ${oy})`]
+  // 按住 ≥200ms 才值得写一行 wait（和手势/键盘同一套阈值）
+  if (hold >= KEY_HOLD_MIN_MS) body.push(`await wait(${Math.max(50, Math.round(hold / 50) * 50)})`)
+  body.push('await touchUp()')
+
+  return { code: join(recordGapLine(gap), body.join('\n')), at: o.now }
 }
 
 export interface RecordKeyOpts extends Omit<Common, 'now'> {
