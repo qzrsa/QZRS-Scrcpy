@@ -81,6 +81,11 @@ const nowTs = (): string => {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
 }
 
+/** 把录制出来的代码接到编辑器现有内容后面（编辑器本来就空时就不加分隔注释） */
+function appendRecorded(base: string, rec: string): string {
+  return base.trim() ? `${base.trimEnd()}\n\n// —— 以下是录制的操作 ——\n${rec}` : rec
+}
+
 export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast, onStartRecord, recordedCode, onRecordedConsumed }: Props): JSX.Element {
   const [scripts, setScripts] = useState<ScriptInfo[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -121,6 +126,13 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set())
   const logRef = useRef<HTMLDivElement>(null)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  /**
+   * 录制结果是"边录边攒"的状态放在 App 里，停止录制才把整段代码传进来。
+   * 但面板是那一刻才挂载的：listScripts() 是异步的，它回来之后会用
+   * `setCode(脚本原文)` **把刚回填的录制内容整个覆盖掉**（探针实测过）。
+   * 所以先把录制内容存进 ref，等脚本列表回来时再合并。
+   */
+  const pendingRecordRef = useRef<string | null>(null)
   const preRef = useRef<HTMLPreElement>(null)
   const gutterRef = useRef<HTMLDivElement>(null)
 
@@ -137,7 +149,9 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
       if (list.length > 0) {
         setSelectedId(list[0].id)
         setName(list[0].name)
-        setCode(list[0].code)
+        const rec = pendingRecordRef.current
+        pendingRecordRef.current = null
+        setCode(rec ? appendRecorded(list[0].code, rec) : list[0].code)
       }
     })
     void window.api.listTemplates().then(setTemplates)
@@ -148,7 +162,8 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
   // 录制生成的代码回填：追加到当前编辑器内容后
   useEffect(() => {
     if (!recordedCode) return
-    setCode((prev) => (prev.trim() ? `${prev.trimEnd()}\n\n// —— 以下是录制的操作 ——\n${recordedCode}` : recordedCode))
+    pendingRecordRef.current = recordedCode
+    setCode((prev) => appendRecorded(prev, recordedCode))
     setDirty(true)
     onRecordedConsumed()
   }, [recordedCode, onRecordedConsumed])

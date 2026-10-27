@@ -268,10 +268,11 @@ export default function App(): JSX.Element {
     setRecordedCode(null)
     setScriptRecording(true)
     setPanel(null) // 面板遮罩会挡投屏操作，录制时收起
-    showToast('录制中：在投屏窗口里操作，点击/滑动会转成脚本', 'info')
+    showToast('录制中：在投屏窗口里操作，点击/滑动/按键（含按键映射）都会转成脚本', 'info')
   }, [showToast])
 
-  const handleRecordGesture = useCallback((line: string): void => {
+  /** 手势与键盘共用同一个追加函数：录制顺序就是代码顺序 */
+  const handleRecordLine = useCallback((line: string): void => {
     setRecordLines((l) => [...l, line])
   }, [])
 
@@ -348,7 +349,8 @@ export default function App(): JSX.Element {
             debug={settings.debugLog === true}
             fileLog={settings.debugLogToFile}
             recording={scriptRecording}
-            onRecordGesture={handleRecordGesture}
+            onRecordGesture={handleRecordLine}
+            onRecordKey={handleRecordLine}
             onEditClose={() => setKeymapEditing(false)}
             onKeymapChange={handleKeymapChange}
           />
@@ -369,7 +371,7 @@ export default function App(): JSX.Element {
           {scriptRecording && (
             <div className="record-bar">
               <span className="record-dot" />
-              <span>录制脚本中 · 已录 {recordLines.length} 个动作（键盘操作不录制）</span>
+              <span>录制脚本中 · 已录 {recordLines.length} 个动作（手势 + 键盘）</span>
               <button className="btn btn-danger btn-sm" onClick={stopScriptRecord}>
                 停止并生成
               </button>

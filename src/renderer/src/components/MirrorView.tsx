@@ -5,8 +5,21 @@ import type { DecoderAcceleration } from '../decoder/h264'
 import { KEYCODE, META, BUTTON, keycodeFromEventCode, normalizeKeyCode } from '../keycodes'
 import { MIRROR_PADDING, fitContain, hasRealVideoSize, relativeRect } from '../videoFit'
 import { recordGestureLine } from '../recordgesture'
+import { recordKeyLine, stickLine, keyLine } from '../recordkey'
 import type { SessionInfo } from '../store'
 import { KeymapEditor, Crosshair } from './KeymapEditor'
+
+/** 只用来改 metastate 的按键：单独按下不录，折进下一个键的第三个参数 */
+const MODIFIER_CODES = new Set([
+  'ShiftLeft',
+  'ShiftRight',
+  'ControlLeft',
+  'ControlRight',
+  'AltLeft',
+  'AltRight',
+  'MetaLeft',
+  'MetaRight'
+])
 
 interface Props {
   session: SessionInfo | null
@@ -28,6 +41,8 @@ interface Props {
   /** 脚本录制模式：true 时把用户的指针手势转成脚本代码行回传 */
   recording?: boolean
   onRecordGesture?: (codeLine: string) => void
+  /** 脚本录制模式：键盘（含按键映射动作）也会转成脚本代码行回传 */
+  onRecordKey?: (codeLine: string) => void
   /**
    * 画面是否随窗口大小自适应缩放（设置项 `mirrorAutoFit`，默认开）。
    * 开启时按「等比缩放 + 完整可见」算出显示尺寸写成显式像素，窗口模式与全屏都生效，
@@ -58,6 +73,7 @@ export function MirrorView({
   onKeymapChange,
   recording,
   onRecordGesture,
+  onRecordKey,
   autoFit = true
 }: Props): JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -68,6 +84,36 @@ export function MirrorView({
   const recordDownRef = useRef<{ x: number; y: number; time: number } | null>(null)
   /** 上一次录制动作的结束时刻：用来把两次操作之间的停顿也录成 `await wait(...)` */
   const recordLastAtRef = useRef(0)
+  /** 键盘录制：按下的键 → 按下时刻/命中的映射/metastate（抬手时才知道按了多久） */
+  const keyRecRef = useRef(new Map<string, { downAt: number; binding: KeymapBinding | null; metastate: number }>())
+  /**
+   * 摇杆录制：一个 group 共享一根手指，等最后一个方向松开才落成一条动作。
+   * vectors 记这一轮按下过的**所有**方向（先松开的不能被删掉，否则 W+A 会丢一半），
+   * pressed 只记当前还按着的，用来判断"是不是最后一个松开"。
+   */
+  const stickRecRef = useRef(
+    new Map<
+      string,
+      {
+        startAt: number
+        centerX: number
+        centerY: number
+        radius: number
+        vectors: Map<string, { dx: number; dy: number }>
+        pressed: Set<string>
+      }
+    >()
+  )
+  /**
+   * 键盘监听那段 effect 的依赖只有 sessionId/send（避免每次改设置都重挂监听），
+   * 里面的 recording / onRecordKey 会是**首次渲染的旧闭包** → 用 ref 中转。
+   */
+  const recordingRef = useRef(!!recording)
+  const onRecordKeyRef = useRef(onRecordKey)
+  useEffect(() => {
+    recordingRef.current = !!recording
+    onRecordKeyRef.current = onRecordKey
+  }, [recording, onRecordKey])
   const metaRef = useRef(0)
   /** per-binding runtime state for `hold` / `repeat` / `view` */
   const bindingStateRef = useRef<Map<string, BindingState>>(new Map())
@@ -169,7 +215,10 @@ export function MirrorView({
 
   // 录制开始时清掉"上一次动作时刻"：第一下操作不该凭空多出一段 wait
   useEffect(() => {
-    if (recording) recordLastAtRef.current = 0
+    if (!recording) return
+    recordLastAtRef.current = 0
+    keyRecRef.current.clear()
+    stickRecRef.current.clear()
   }, [recording])
 
   // stage 尺寸变化（拖窗口 / 进出全屏 / 侧栏开合）与开关切换都要重算画布显示尺寸。
@@ -565,6 +614,136 @@ export function MirrorView({
     touch(1, st.curX, st.curY, px.w, px.h, st.pointerId, 0, 0)
   }
 
+  /**
+   * 键盘录制：一次 keydown/keyup → 一行（或几行）脚本。
+   *
+   * 规则本身全在 recordkey.ts 的纯函数里（可单测），这里只负责
+   * 「什么时候录、按了多久、摇杆怎么攒」这些必须贴着运行时状态的判断。
+   *
+   * 注意：这个函数被上面的键盘 effect 以**首次渲染的闭包**持有，所以
+   * 它只能用 ref，不许直接读 props/state（recording、onRecordKey 都走 ref）。
+   */
+  const recordKey = (phase: 'down' | 'up', e: KeyboardEvent, binding: KeymapBinding | null): void => {
+    if (!recordingRef.current) return
+    const emit = onRecordKeyRef.current
+    if (!emit) return
+    // 修饰键单独按不录（折进下一个键的 metastate）；按住时的系统重复也不录
+    if (MODIFIER_CODES.has(e.code)) return
+    if (phase === 'down' && e.repeat) return
+
+    const canvas = canvasRef.current
+    const videoW = canvas?.width ?? 0
+    const videoH = canvas?.height ?? 0
+    const now = Date.now()
+
+    // ---- 摇杆（groupId）：按住期间各方向只是往同一根手指上叠向量 ----
+    if (binding?.groupId) {
+      const gid = binding.groupId
+      if (phase === 'down') {
+        let g = stickRecRef.current.get(gid)
+        if (!g) {
+          // 中心与半径跟 dispatchKeymapDown 用同一套算法，否则录出来的落点会偏
+          const km = keymapRef.current
+          const group = km ? km.bindings.filter((b) => b.groupId === gid) : []
+          const cx = group.length ? group.reduce((s, b) => s + b.x, 0) / group.length : 0.5
+          const cy = group.length ? group.reduce((s, b) => s + b.y, 0) / group.length : 0.5
+          const radius = Math.max(
+            0.01,
+            group.length ? Math.max(...group.map((b) => Math.hypot(b.x - cx, b.y - cy))) : 0.06
+          )
+          g = { startAt: now, centerX: cx, centerY: cy, radius, vectors: new Map(), pressed: new Set() }
+          stickRecRef.current.set(gid, g)
+        }
+        g.vectors.set(binding.id, { dx: binding.x - g.centerX, dy: binding.y - g.centerY })
+        g.pressed.add(binding.id)
+        return
+      }
+      const g = stickRecRef.current.get(gid)
+      if (!g) return
+      g.pressed.delete(binding.id)
+      if (g.pressed.size > 0) return // 还有别的方向按着 → 这一下不算完整动作
+      stickRecRef.current.delete(gid)
+      let vx = 0
+      let vy = 0
+      for (const v of g.vectors.values()) {
+        vx += v.dx
+        vy += v.dy
+      }
+      // 和 updateStickVector 一样把合力夹到摇杆边缘（W+A 落在 45° 而不是圆外）
+      const len = Math.hypot(vx, vy)
+      if (len > g.radius) {
+        vx = (vx / len) * g.radius
+        vy = (vy / len) * g.radius
+      }
+      const line = stickLine({
+        downAt: g.startAt,
+        lastAt: recordLastAtRef.current,
+        now,
+        centerX: g.centerX,
+        centerY: g.centerY,
+        dx: vx,
+        dy: vy,
+        videoW,
+        videoH
+      })
+      recordLastAtRef.current = line.at
+      emit(line.code)
+      return
+    }
+
+    const keycode = keycodeFromEventCode(e.code)
+
+    if (phase === 'down') {
+      // 按下时先记着：按住多久要等抬手才知道（tap/swipe 这类自带时长的一按就录完）
+      keyRecRef.current.set(e.code, { downAt: now, binding, metastate: metaRef.current })
+      const line = recordKeyLine({
+        phase: 'down',
+        keycode,
+        binding,
+        downAt: now,
+        lastAt: recordLastAtRef.current,
+        now,
+        metastate: metaRef.current,
+        videoW,
+        videoH
+      })
+      if (!line) return
+      keyRecRef.current.delete(e.code)
+      recordLastAtRef.current = line.at
+      emit(line.code)
+      return
+    }
+
+    const rec = keyRecRef.current.get(e.code)
+    keyRecRef.current.delete(e.code)
+    if (!rec) return
+    const line = recordKeyLine({
+      phase: 'up',
+      keycode,
+      binding: rec.binding,
+      downAt: rec.downAt,
+      lastAt: recordLastAtRef.current,
+      now,
+      metastate: rec.metastate,
+      videoW,
+      videoH
+    })
+    if (!line) return
+    recordLastAtRef.current = line.at
+    emit(line.code)
+  }
+
+  /** 录制：右键 BACK / 中键 HOME 这种「一次点击 = 一个按键」的操作 */
+  const recordSimpleKey = (keycode: number): void => {
+    if (!recordingRef.current) return
+    const emit = onRecordKeyRef.current
+    if (!emit) return
+    const now = Date.now()
+    const line = keyLine({ keycode, holdMs: 0, metastate: 0, downAt: now, lastAt: recordLastAtRef.current, now })
+    recordLastAtRef.current = line.at
+    emit(line.code)
+  }
+
   // Keyboard listeners on the window (input works even when canvas not hovered).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent): void => {
@@ -587,6 +766,7 @@ export function MirrorView({
           const b0 = matches[0]
           const gid = b0.groupId ? ` group=${b0.groupId.slice(-4)}` : ''
           pushDebug(`HIT ${e.code} → ${b0.action}${gid} @ (${b0.x.toFixed(2)},${b0.y.toFixed(2)}) canvas=${csize}`)
+          recordKey('down', e, b0)
           for (const b of matches) dispatchKeymapDown(b)
           return
         } else {
@@ -600,6 +780,7 @@ export function MirrorView({
       const kc = keycodeFromEventCode(e.code)
       if (kc == null) return
       e.preventDefault()
+      recordKey('down', e, null)
       send({ type: 'keycode', action: 0, keycode: kc, repeat: e.repeat ? 1 : 0, metastate: metaRef.current })
     }
     const onKeyUp = (e: KeyboardEvent): void => {
@@ -613,6 +794,7 @@ export function MirrorView({
         const matches = km.bindings.filter((b) => normalizeKeyCode(b.key) === e.code)
         if (matches.length > 0) {
           e.preventDefault()
+          recordKey('up', e, matches[0])
           for (const b of matches) dispatchKeymapUp(b)
           return
         }
@@ -621,6 +803,7 @@ export function MirrorView({
       const kc = keycodeFromEventCode(e.code)
       if (kc == null) return
       e.preventDefault()
+      recordKey('up', e, null)
       send({ type: 'keycode', action: 1, keycode: kc, repeat: 0, metastate: metaRef.current })
     }
     window.addEventListener('keydown', onKeyDown)
@@ -636,13 +819,15 @@ export function MirrorView({
     if (!session) return
     if (e.pointerType === 'mouse') {
       if (e.button === 2) {
-        // right click → BACK
+        // right click → BACK（录制时落成 key('BACK')，回放不需要鼠标）
+        recordSimpleKey(KEYCODE.BACK)
         send({ type: 'keycode', action: 0, keycode: KEYCODE.BACK, repeat: 0, metastate: 0 })
         send({ type: 'keycode', action: 1, keycode: KEYCODE.BACK, repeat: 0, metastate: 0 })
         return
       }
       if (e.button === 1) {
         // middle click → HOME
+        recordSimpleKey(KEYCODE.HOME)
         send({ type: 'keycode', action: 0, keycode: KEYCODE.HOME, repeat: 0, metastate: 0 })
         send({ type: 'keycode', action: 1, keycode: KEYCODE.HOME, repeat: 0, metastate: 0 })
         return

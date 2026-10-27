@@ -33,6 +33,17 @@ const TAP_DIST_PX = 24
 /** 按住超过这个值算长按 */
 const LONG_PRESS_MS = 500
 
+/**
+ * 停顿 → `await wait(ms)` 这一行（不需要插 wait 时返回空串）。
+ *
+ * 手势录制和键盘录制共用同一条规则：两边如果各写一份，迟早会有一边
+ * 把 50ms 取整写成 100ms，录出来的脚本节奏就对不上了。
+ */
+export function recordGapLine(gap: number): string {
+  if (gap < RECORD_GAP_MIN_MS) return ''
+  return `await wait(${Math.max(RECORD_GAP_MIN_MS, Math.round(gap / 50) * 50)})`
+}
+
 export function recordGestureLine(opts: {
   /** 按下点（含时间） */
   down: RecordPoint
@@ -47,8 +58,7 @@ export function recordGestureLine(opts: {
   const rx = (v: number): number => Math.round(v)
 
   const gap = lastAt > 0 ? down.time - lastAt : 0
-  const waitLine =
-    gap >= RECORD_GAP_MIN_MS ? `await wait(${Math.max(RECORD_GAP_MIN_MS, Math.round(gap / 50) * 50)})` : ''
+  const waitLine = recordGapLine(gap)
 
   const dt = Math.max(30, now - down.time)
   const dist = Math.hypot(up.x - down.x, up.y - down.y)
