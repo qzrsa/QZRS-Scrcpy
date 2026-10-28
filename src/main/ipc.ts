@@ -48,6 +48,8 @@ const EMPTY_EXTRA: ParsedSubnets = parseSubnets([])
 interface SessionHandle {
   session: ScrcpySession
   serial: string
+  /** 会话启动参数：断线自动重连（方案 B）时用它重建会话 */
+  opts: SessionOptions
 }
 
 export function registerIpc(store: Store): AppManager {
@@ -467,6 +469,23 @@ export function registerIpc(store: Store): AppManager {
     onEvent: (evt) => {
       send('script:event', evt)
       if (scriptLogToFile) scriptLogger.write(formatScriptEvent(evt))
+      // 断线重跑状态机：清理已结束的运行记录；断线中止 → 进待重跑队列
+      if (evt.state === 'done' || evt.state === 'stopped') {
+        runningScriptsMeta.delete(evt.scriptId)
+        pendingRerun.delete(evt.scriptId)
+      } else if (evt.state === 'error') {
+        const meta = runningScriptsMeta.get(evt.scriptId)
+        runningScriptsMeta.delete(evt.scriptId)
+        // 断线中止 + 会话已进入自动重连流程（reconnectItems 有该会话）→ 才进待重跑队列。
+        // 用户主动停投屏走 session:stop，不触发 onStopped，reconnectItems 不会有该会话，
+        // 这里也就不进队列（避免日志说"加入重跑"却永远不重跑）。
+        if (meta && isDisconnectError(evt.message) && reconnectItems.has(meta.sessionId)) {
+          pendingRerun.set(evt.scriptId, meta)
+          sysScriptLog(`⚠ 脚本「${evt.name}」因会话断开中止，已加入待重跑队列`)
+          // 会话可能比脚本 error 更早重建好 → 立即尝试重跑
+          if (sessions.has(meta.sessionId)) maybeRerunScripts(meta.sessionId)
+        }
+      }
     },
     findTemplate,
     getPixelColor,
@@ -578,22 +597,156 @@ export function registerIpc(store: Store): AppManager {
     }
   }
 
+  // ---- 断线自动重连 + 脚本自动重跑（方案 B）----
+  // 脚本运行期间会话意外断开 → 主进程自动重建会话（复用原 sessionId），脚本因断线
+  // 中止后，等会话重建成功再自动从头重跑同一个脚本。全程写详细日志（面板运行日志 +
+  // logs/scripts 落盘），排查问题时能对得上完整时间线。
+  const RECONNECT_ATTEMPTS = 20 // 每 3s 一次，最多约 60s 放弃
+  const RECONNECT_INTERVAL_MS = 3000
+
+  /** 正在运行的脚本 → 断线重跑所需完整参数（scripts:run 与重跑时登记） */
+  const runningScriptsMeta = new Map<
+    string,
+    { sessionId: string; serial: string; opts: SessionOptions; loopMs: number; maxRounds: number; name: string }
+  >()
+  /** 因断线中止、等会话重建后自动重跑的脚本（key = scriptId） */
+  const pendingRerun = new Map<
+    string,
+    { sessionId: string; serial: string; opts: SessionOptions; loopMs: number; maxRounds: number; name: string }
+  >()
+  /** 待重建的会话（key = sessionId） */
+  const reconnectItems = new Map<string, { serial: string; opts: SessionOptions; attempts: number }>()
+  let reconnectLoopTimer: NodeJS.Timeout | null = null
+  let reconnectLoopBusy = false
+
+  /** 把断线/重连/重跑这类系统级日志打进脚本面板运行日志 + 落盘（用户要求"详细记录"） */
+  function sysScriptLog(line: string): void {
+    send('script:event', { runId: 'sys', scriptId: '', name: '', state: 'log', line } satisfies ScriptRunEvent)
+    if (scriptLogToFile) scriptLogger.write(line)
+  }
+
+  /** 脚本引擎断线报错的文案特征（checkStop 抛「会话已断开，脚本中止」） */
+  function isDisconnectError(message: string): boolean {
+    return message.includes('会话已断开') || message.includes('会话不存在或已断开')
+  }
+
+  /** 登记一个正在运行的脚本（断线后据此判断要不要重连、重跑时还原循环参数） */
+  function rememberRunningScript(
+    scriptId: string,
+    sessionId: string,
+    serial: string,
+    opts: SessionOptions | undefined,
+    loopMs: number,
+    maxRounds: number,
+    name: string
+  ): void {
+    if (!opts) return
+    runningScriptsMeta.set(scriptId, { sessionId, serial, opts, loopMs, maxRounds, name })
+  }
+
+  /** 会话断开时调用：有脚本在跑才登记待重建并启动重建循环（幂等，重复触发无副作用） */
+  function scheduleReconnect(sid: string, serial: string, opts: SessionOptions | undefined): void {
+    if (!opts) return
+    const needed =
+      [...runningScriptsMeta.values()].some((m) => m.sessionId === sid) ||
+      [...pendingRerun.values()].some((m) => m.sessionId === sid)
+    if (!needed) return
+    if (reconnectItems.has(sid)) return
+    reconnectItems.set(sid, { serial, opts, attempts: 0 })
+    sysScriptLog(`⚠ 会话断开（${serial}），检测到脚本正在运行，将自动重连并重跑`)
+    ensureReconnectLoop()
+  }
+
+  function ensureReconnectLoop(): void {
+    if (reconnectLoopTimer) return
+    reconnectLoopTimer = setInterval(() => void reconnectAllTick(), RECONNECT_INTERVAL_MS)
+  }
+
+  /** 每 3s 一轮：设备上线就重建会话；超上限就放弃并清理待重跑 */
+  async function reconnectAllTick(): Promise<void> {
+    if (reconnectLoopBusy) return
+    reconnectLoopBusy = true
+    try {
+      for (const [sid, item] of [...reconnectItems]) {
+        // 用户已经手动停了脚本 → 不再需要重建
+        const stillNeeded =
+          [...runningScriptsMeta.values()].some((m) => m.sessionId === sid) ||
+          [...pendingRerun.values()].some((m) => m.sessionId === sid)
+        if (!stillNeeded) {
+          reconnectItems.delete(sid)
+          continue
+        }
+        if (sessions.has(sid)) {
+          reconnectItems.delete(sid)
+          continue
+        }
+        item.attempts++
+        if (item.attempts > RECONNECT_ATTEMPTS) {
+          reconnectItems.delete(sid)
+          sysScriptLog(`✘ 会话 ${item.serial} 自动重连失败（重试 ${RECONNECT_ATTEMPTS} 次），放弃自动重跑`)
+          for (const [k, m] of pendingRerun) if (m.sessionId === sid) pendingRerun.delete(k)
+          continue
+        }
+        try {
+          // tcpip 设备先 adb connect（幂等，设备没上线会失败）；USB 设备直接重建
+          if (/^[0-9.]+:\d+$/.test(item.serial)) {
+            await ensureAdb().connect(item.serial, 10000)
+          }
+          sysScriptLog(`⏳ 尝试重连设备 ${item.serial} 并重建会话（第 ${item.attempts} 次）…`)
+          startSession(item.serial, item.opts, sid)
+        } catch (err) {
+          sysScriptLog(`⏳ 重连尝试 ${item.attempts} 失败：${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+      if (reconnectItems.size === 0 && reconnectLoopTimer) {
+        clearInterval(reconnectLoopTimer)
+        reconnectLoopTimer = null
+      }
+    } finally {
+      reconnectLoopBusy = false
+    }
+  }
+
+  /** 会话重建成功（onStarted）后：把等这个会话的脚本自动重跑 */
+  function maybeRerunScripts(sessionId: string): void {
+    reconnectItems.delete(sessionId)
+    for (const [scriptId, m] of [...pendingRerun]) {
+      if (m.sessionId !== sessionId) continue
+      pendingRerun.delete(scriptId)
+      sysScriptLog(`✔ 会话已重建，自动重跑脚本「${m.name}」`)
+      const script = store.getScripts().find((s) => s.id === scriptId)
+      if (!script) {
+        sysScriptLog(`✘ 自动重跑失败：脚本「${m.name}」已不存在`)
+        continue
+      }
+      try {
+        scriptEngine.run(script, sessionId, { loopMs: m.loopMs, maxRounds: m.maxRounds })
+        rememberRunningScript(scriptId, sessionId, m.serial, m.opts, m.loopMs, m.maxRounds, m.name)
+      } catch (err) {
+        sysScriptLog(`✘ 自动重跑脚本「${m.name}」失败：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+  }
+
   // ---- OCR 模型下载 ----
   // 模型不进安装包，设置里按需下载（GitHub Release 默认源，electron.net 走系统代理）。
   const ocrDownloader = new OcrModelDownloader()
   ocrDownloader.onProgress((p: OcrProgress) => send('ocr:progress', p))
 
   // ---- session management ----
-  function startSession(serial: string, opts: SessionOptions): { sessionId: string } {
+  function startSession(serial: string, opts: SessionOptions, reuseId?: string): { sessionId: string } {
     const a = ensureAdb()
-    const sessionId = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    // 断线自动重连时复用原 sessionId：脚本/渲染层都不需要感知会话换了个 id
+    const sessionId = reuseId || `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`
     const session = new ScrcpySession(sessionId, a, serial, opts, serverPath, {
       onStarted: (info) => {
-        sessions.set(sessionId, { session, serial })
+        sessions.set(sessionId, { session, serial, opts })
         videoSizes.set(sessionId, { width: info.width, height: info.height })
         startStatsPolling()
         send('session:state', { sessionId, state: 'started', serial, deviceName: info.deviceName, width: info.width, height: info.height } satisfies SessionStateEvent)
         log(`[${info.deviceName}] 已连接，视频 ${info.width}x${info.height}`)
+        // 断线重连成功 → 把等待这个会话的脚本自动重跑
+        maybeRerunScripts(sessionId)
       },
       onFrame: (sid, data, pts, isKey, isConfig) => {
         const evt: FrameEvent = { sessionId: sid, data, pts, isKey, isConfig }
@@ -616,19 +769,27 @@ export function registerIpc(store: Store): AppManager {
         send('session:audio-disabled', { sessionId: sid, reason })
       },
       onStopped: (sid) => {
-        const serial = sessions.get(sid)?.serial ?? ''
+        const h = sessions.get(sid)
+        const serial = h?.serial ?? ''
+        const opts = h?.opts
         sessions.delete(sid)
         videoSizes.delete(sid)
         if (sessions.size === 0) stopStatsPolling()
         send('session:state', { sessionId: sid, serial, state: 'stopped' } satisfies SessionStateEvent)
+        // 意外断开（用户主动停投屏会先置 disposed，不会走到这里）→ 尝试自动重连
+        scheduleReconnect(sid, serial, opts)
       },
       onError: (sid, message) => {
-        const serial = sessions.get(sid)?.serial ?? ''
+        const h = sessions.get(sid)
+        const serial = h?.serial ?? ''
+        const opts = h?.opts
         sessions.delete(sid)
         videoSizes.delete(sid)
         if (sessions.size === 0) stopStatsPolling()
         send('session:state', { sessionId: sid, serial, state: 'error', message } satisfies SessionStateEvent)
         log(`[错误] ${message}`)
+        // 启动失败/协议错误也走同一条重连逻辑（有脚本在跑才真正重连）
+        scheduleReconnect(sid, serial, opts)
       },
       onClipboard: (sid, text) => {
         clipboard.writeText(text)
@@ -638,7 +799,7 @@ export function registerIpc(store: Store): AppManager {
         if (line) log(line)
       }
     })
-    sessions.set(sessionId, { session, serial })
+    sessions.set(sessionId, { session, serial, opts })
     void session.start()
     return { sessionId }
   }
@@ -1055,11 +1216,14 @@ export function registerIpc(store: Store): AppManager {
     try {
       const script = store.getScripts().find((s) => s.id === String(scriptId))
       if (!script) return { ok: false, message: '脚本不存在' }
+      const sid = String(sessionId)
+      const loop = Number(loopMs) || 0
+      const rounds = Number(maxRounds) || 0
       // loopMs > 0 = 录制宏的「每 N 秒重播一遍」，由引擎包成 while 循环；maxRounds 跑满即停
-      const { runId } = scriptEngine.run(script, String(sessionId), {
-        loopMs: Number(loopMs) || 0,
-        maxRounds: Number(maxRounds) || 0
-      })
+      const { runId } = scriptEngine.run(script, sid, { loopMs: loop, maxRounds: rounds })
+      // 登记运行参数：断线自动重连（方案 B）时据此判断要不要重建会话、重跑时还原参数
+      const h = sessions.get(sid)
+      rememberRunningScript(String(scriptId), sid, h?.serial ?? '', h?.opts, loop, rounds, script.name)
       return { ok: true, runId }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }
@@ -1480,6 +1644,10 @@ export function registerIpc(store: Store): AppManager {
       if (reconnectTimer) {
         clearInterval(reconnectTimer)
         reconnectTimer = null
+      }
+      if (reconnectLoopTimer) {
+        clearInterval(reconnectLoopTimer)
+        reconnectLoopTimer = null
       }
       if (watcherRestartTimer) {
         clearTimeout(watcherRestartTimer)
