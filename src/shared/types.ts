@@ -487,7 +487,7 @@ export interface ScriptInfo {
 /** 脚本运行事件（主进程 → 渲染层 'script:event' 通道） */
 export type ScriptRunEvent =
   | { runId: string; scriptId: string; name: string; state: 'started'; sessionId: string }
-  | { runId: string; scriptId: string; name: string; state: 'log'; line: string }
+  | { runId: string; scriptId: string; name: string; state: 'log'; line: string; /** 仅落盘、不推面板的高频调试日志（如 stick 心跳） */ debug?: boolean }
   | { runId: string; scriptId: string; name: string; state: 'done'; elapsedMs: number }
   | { runId: string; scriptId: string; name: string; state: 'stopped' }
   | { runId: string; scriptId: string; name: string; state: 'error'; message: string; /** 出错的用户脚本行号（1 起，解析不出为 undefined） */ line?: number }

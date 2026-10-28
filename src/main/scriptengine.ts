@@ -324,6 +324,14 @@ export class ScriptEngine {
   }
 
   /**
+   * 仅落盘的 debug 级日志（stick 心跳等高频信息，不刷脚本面板）。
+   * 排查「指令发了没生效 vs 压根没发」用：grep `[stick]` 看 ↓↑ 是否成对。
+   */
+  private emitDebug(st: RunState, line: string): void {
+    this.emit(st, { state: 'log', line, debug: true })
+  }
+
+  /**
    * 从异常栈解析用户脚本行号。
    * 栈里用户帧形如 `at xxx.js:2:1`；外层包装在用户代码前加了若干行
    * （普通模式 1 行 `(async () => {`；循环模式再加 1 行 `while (true) {`），
@@ -585,6 +593,7 @@ export class ScriptEngine {
 
       touch(0, ax, ay, 1) // DOWN：按在摇杆中心，游戏以这里为原点
       st.finger = { x: ax, y: ay }
+      this.emitDebug(st, `[stick] ↓ 中心(${Math.round(ax)},${Math.round(ay)}) → (${Math.round(bx)},${Math.round(by)})，hold=${hold}ms`)
       await sleep(STICK_SETTLE_MS) // 跨帧，别让 DOWN 和 MOVE 挤进同一帧
       st.finger = { x: bx, y: by }
       touch(2, bx, by, 1) // 第一次推出方向
@@ -604,6 +613,7 @@ export class ScriptEngine {
 
       st.finger = null
       touch(1, bx, by, 0) // UP
+      this.emitDebug(st, `[stick] ↑ 完成（MOVE×${ticks + 1}）`)
       checkStop()
     }
 

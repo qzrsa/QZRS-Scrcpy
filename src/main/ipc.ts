@@ -517,6 +517,11 @@ export function registerIpc(store: Store): AppManager {
     getVideoSize: (sessionId) => videoSizes.get(sessionId) ?? null,
     isSessionAlive: (sessionId) => sessions.has(sessionId),
     onEvent: (evt) => {
+      // debug 级日志只落盘、不推面板（stick 心跳这类高频日志刷屏无意义，且会拖慢渲染层）
+      if (evt.state === 'log' && evt.debug) {
+        if (scriptLogToFile) scriptLogger.write(formatScriptEvent(evt))
+        return
+      }
       send('script:event', evt)
       if (scriptLogToFile) scriptLogger.write(formatScriptEvent(evt))
       // 断线重跑状态机：清理已结束的运行记录；断线中止 → 进待重跑队列
