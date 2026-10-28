@@ -1519,6 +1519,63 @@ body.drawer-resizing {
   flex-shrink: 0;
 }
 
+/* 日志头部右侧动作区：存盘勾选 / 打开日志目录 / 停止热键 / 清空 */
+.log-title {
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 10px;
+  flex-shrink: 0;
+}
+
+.log-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: pointer;
+  color: #8b949e;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.log-save input[type='checkbox'] {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.log-save.on {
+  color: #c9d1d9;
+}
+
+.hotkey-input {
+  width: 116px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #c9d1d9;
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 4px;
+}
+
+.hotkey-input:focus {
+  border-color: var(--accent);
+}
+
+.hotkey-input::placeholder {
+  color: #6e7681;
+}
+
 .script-log-body {
   flex: 1;
   min-height: 0;

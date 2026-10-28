@@ -39,6 +39,10 @@ const DEFAULT_SETTINGS: AppSettings = {
   updateBase: '',
   // 上一次更新结果的去重键（'' = 还没报过）
   lastUpdateNotice: '',
+  // 脚本运行日志落盘（默认关）：开启后运行日志逐行写 logs/scripts/<日期>.log
+  scriptLogToFile: false,
+  // 全局「停止全部脚本」热键（Electron accelerator）；空串 = 不注册
+  scriptStopHotkey: '',
   session: {
     bitRate: 8000000,
     maxFps: 0,

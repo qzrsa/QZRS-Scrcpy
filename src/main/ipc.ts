@@ -1,4 +1,4 @@
-import { ipcMain, dialog, clipboard, app, BrowserWindow, shell, type IpcMainInvokeEvent } from 'electron'
+import { ipcMain, dialog, clipboard, app, BrowserWindow, shell, globalShortcut, type IpcMainInvokeEvent } from 'electron'
 import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
@@ -27,6 +27,7 @@ import type {
   AppSettings,
   KeymapConfig,
   ScriptInfo,
+  ScriptRunEvent,
   FrameEvent,
   StreamMeta,
   SessionStateEvent,
@@ -65,6 +66,15 @@ export function registerIpc(store: Store): AppManager {
   let statsTimer: NodeJS.Timeout | null = null
   // 调试日志落盘器（设置「调试时写入日志文件」+ 调试开关同时打开才会真正写入）
   const debugLogger = new DebugFileLogger(debugLogDirCandidates())
+  // 脚本运行日志落盘器：独立子目录 logs/scripts/，避免和按键调试日志混在一个文件里。
+  // 文件名与 debugLogger 一样按日期切（<日期>.log）。
+  const scriptLogDirCandidates = (): string[] => debugLogDirCandidates().map((d) => join(d, 'scripts'))
+  const scriptLogger = new DebugFileLogger(scriptLogDirCandidates())
+  // 脚本日志是否落盘（内存镜像 settings.scriptLogToFile，settings:set 时同步）。
+  // 脚本 log 事件非常高频，不能每次都去读 settings.json。
+  let scriptLogToFile = store.getSettings().scriptLogToFile === true
+  // 当前已注册成功的停止热键（空 = 未注册），applyScriptHotkey 用它对账避免重复注册
+  let scriptHotkeyActive = ''
   // ---- adb track-devices 长连接监听（替代 3s 轮询）----
   let deviceWatcher: ChildProcess | null = null
   let watcherRestartTimer: NodeJS.Timeout | null = null
@@ -431,6 +441,22 @@ export function registerIpc(store: Store): AppManager {
     return { found: false, x: -1, y: -1 }
   }
 
+  /** 把脚本运行事件转成一行可读文本（文案与脚本面板日志区一致，方便对着看） */
+  const formatScriptEvent = (evt: ScriptRunEvent): string => {
+    switch (evt.state) {
+      case 'started':
+        return `▶ 开始运行「${evt.name}」（会话 ${evt.sessionId}）`
+      case 'log':
+        return evt.line
+      case 'done':
+        return `✔ 运行完成（${evt.elapsedMs}ms）`
+      case 'stopped':
+        return '■ 已停止'
+      case 'error':
+        return `✘ ${evt.message}${evt.line ? `（第 ${evt.line} 行）` : ''}`
+    }
+  }
+
   const scriptEngine = new ScriptEngine({
     sendControl: (sessionId, cmd) => {
       const h = sessions.get(sessionId)
@@ -438,7 +464,10 @@ export function registerIpc(store: Store): AppManager {
     },
     getVideoSize: (sessionId) => videoSizes.get(sessionId) ?? null,
     isSessionAlive: (sessionId) => sessions.has(sessionId),
-    onEvent: (evt) => send('script:event', evt),
+    onEvent: (evt) => {
+      send('script:event', evt)
+      if (scriptLogToFile) scriptLogger.write(formatScriptEvent(evt))
+    },
     findTemplate,
     getPixelColor,
     findColor
@@ -512,6 +541,40 @@ export function registerIpc(store: Store): AppManager {
         .catch((err) => log(`[Python桥] 启动失败: ${err instanceof Error ? err.message : String(err)}`))
     } else {
       void bridge.stop()
+    }
+  }
+
+  /**
+   * 按设置注册/注销「停止全部脚本」全局热键（Electron globalShortcut）。
+   * 热键是系统级的：脚本面板关着、投屏窗口没焦点、甚至切到别的应用都能触发，
+   * 给"脚本停不下来"兜底。注册失败只记日志，不打断启动。
+   */
+  function applyScriptHotkey(): void {
+    const wanted = String(store.getSettings().scriptStopHotkey || '').trim()
+    if (wanted === scriptHotkeyActive) return
+    if (scriptHotkeyActive) {
+      try {
+        globalShortcut.unregister(scriptHotkeyActive)
+      } catch {
+        /* ignore */
+      }
+      scriptHotkeyActive = ''
+    }
+    if (!wanted) return
+    try {
+      const ok = globalShortcut.register(wanted, () => {
+        scriptEngine.stopAll()
+        pyManager.stopAll()
+        log(`[全局热键] ${wanted} 已停止全部脚本`)
+      })
+      if (ok) {
+        scriptHotkeyActive = wanted
+        log(`[全局热键] 已注册「${wanted}」→ 停止全部脚本`)
+      } else {
+        log(`[全局热键] 注册失败：${wanted} 可能已被其他程序占用或格式不对`)
+      }
+    } catch (err) {
+      log(`[全局热键] 注册异常：${err instanceof Error ? err.message : String(err)}`)
     }
   }
 
@@ -842,6 +905,9 @@ export function registerIpc(store: Store): AppManager {
   ipcMain.handle('settings:get', () => store.getSettings())
   ipcMain.handle('settings:set', (_e, s: AppSettings) => {
     store.setSettings(s)
+    // 脚本日志落盘开关 / 全局停止热键都可能变了，同步内存镜像并重注册
+    scriptLogToFile = s.scriptLogToFile === true
+    applyScriptHotkey()
     // re-resolve adb/server if path changed
     adb = null
     adbPath = ''
@@ -1010,6 +1076,13 @@ export function registerIpc(store: Store): AppManager {
   ipcMain.handle('scripts:openDir', () => {
     void shell.openPath(store.getScriptsDir())
     return { ok: true, dir: store.getScriptsDir() }
+  })
+
+  // 脚本运行日志目录（logs/scripts；展示 + 打开用）
+  ipcMain.handle('scripts:logDir', () => scriptLogger.dir ?? scriptLogDirCandidates()[0])
+  ipcMain.handle('scripts:openLogDir', () => {
+    void shell.openPath(scriptLogger.dir ?? scriptLogDirCandidates()[0])
+    return { ok: true, dir: scriptLogger.dir ?? scriptLogDirCandidates()[0] }
   })
 
   // 导出单个脚本为 json 文件（默认落在「文档」目录，文件名取脚本名）。
@@ -1386,12 +1459,19 @@ export function registerIpc(store: Store): AppManager {
   startDeviceWatcher()
   startAutoReconnect()
   applyBridge()
+  applyScriptHotkey()
   log('应用已启动')
 
   return {
     update: updateService,
     async dispose() {
       debugLogger.flushSync()
+      scriptLogger.flushSync()
+      try {
+        globalShortcut.unregisterAll()
+      } catch {
+        /* ignore */
+      }
       scriptEngine.stopAll() // 停掉所有运行中的脚本（等价于抬起手指，防止退出后虚拟手指悬挂）
       pyManager.stopAll() // Python 脚本子进程一并杀掉（taskkill /T 连树杀）
       await bridge.stop() // Python 桥一并关闭（手势中途退出最多丢一次 UP，scrcpy 会话本身随进程结束）

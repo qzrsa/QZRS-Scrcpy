@@ -152,6 +152,9 @@ const api = {
   runningScripts: (): Promise<Array<{ runId: string; scriptId: string; name: string; sessionId: string }>> =>
     ipcRenderer.invoke('scripts:running'),
   openScriptsDir: (): Promise<{ ok: boolean; dir?: string }> => ipcRenderer.invoke('scripts:openDir'),
+  /** 脚本运行日志目录（logs/scripts），勾选「存盘」后运行日志写到这里 */
+  getScriptLogDir: (): Promise<string> => ipcRenderer.invoke('scripts:logDir'),
+  openScriptLogDir: (): Promise<{ ok: boolean; dir?: string }> => ipcRenderer.invoke('scripts:openLogDir'),
   /** waitImage 模板：保存（渲染层从截图框选裁出 PNG base64）/ 列表 / 删除 */
   saveTemplate: (name: string, base64Png: string): Promise<{ ok: boolean; path?: string; templates?: { name: string; png: string }[]; message?: string }> =>
     ipcRenderer.invoke('scripts:saveTemplate', name, base64Png),

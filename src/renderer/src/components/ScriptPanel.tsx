@@ -98,6 +98,9 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
   const [dirty, setDirty] = useState(false)
   const [lines, setLines] = useState<LogLine[]>([])
   const [templates, setTemplates] = useState<TplItem[]>([])
+  // ---- 日志落盘 + 全局停止热键（存 settings.json，跨会话持久化）----
+  const [logToFile, setLogToFile] = useState(false)
+  const [stopHotkey, setStopHotkey] = useState('')
   // ---- 循环（录制宏）：整段跑完等 N 秒再从头跑，直到点「停止」----
   // 存 localStorage：同一台机器上"我习惯 30 秒一轮"这种偏好没必要进脚本本身。
   const [loopOn, setLoopOn] = useState<boolean>(() => {
@@ -170,7 +173,11 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
     })
     void window.api.listTemplates().then(setTemplates)
     void refreshPyScripts()
-    void window.api.getSettings().then((s) => setPythonPath(s.pythonPath || ''))
+    void window.api.getSettings().then((s) => {
+      setPythonPath(s.pythonPath || '')
+      setLogToFile(s.scriptLogToFile === true)
+      setStopHotkey(s.scriptStopHotkey || '')
+    })
   }, [])
 
   // 录制生成的代码回填：追加到当前编辑器内容后
@@ -282,6 +289,17 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
   const savePythonPath = (): void => {
     const v = pythonPath.trim()
     void window.api.getSettings().then((s) => window.api.setSettings({ ...s, pythonPath: v }))
+  }
+
+  /** 脚本运行日志落盘开关：勾选即写 settings.json，主进程据此决定是否追加写文件 */
+  const setLogToFileSetting = (v: boolean): void => {
+    setLogToFile(v)
+    void window.api.getSettings().then((s) => window.api.setSettings({ ...s, scriptLogToFile: v }))
+  }
+
+  /** 全局停止热键失焦时持久化并让主进程注册/注销（空串 = 禁用） */
+  const saveStopHotkey = (): void => {
+    void window.api.getSettings().then((s) => window.api.setSettings({ ...s, scriptStopHotkey: stopHotkey.trim() }))
   }
 
   const select = (s: ScriptInfo): void => {
@@ -823,12 +841,43 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
 
           <div className="script-log" style={{ height: logH }}>
             <div className="script-log-head">
-              <span>运行日志{sessionLabel ? ` · ${sessionLabel}` : ''}</span>
-              {lines.length > 0 && (
-                <button className="icon-btn" title="清空日志" onClick={() => setLines([])}>
-                  <IconClose width={13} height={13} />
+              <span className="log-title">运行日志{sessionLabel ? ` · ${sessionLabel}` : ''}</span>
+              <span className="log-actions">
+                <label
+                  className={`log-save ${logToFile ? 'on' : ''}`}
+                  title="把运行日志逐行追加到本地文件（logs/scripts/<日期>.log），方便事后排查脚本为什么没跑/报错"
+                >
+                  <input
+                    type="checkbox"
+                    checked={logToFile}
+                    onChange={(e) => setLogToFileSetting(e.target.checked)}
+                  />
+                  存盘
+                </label>
+                <button
+                  className="icon-btn"
+                  title="打开日志目录"
+                  onClick={() => void window.api.openScriptLogDir()}
+                >
+                  <IconFolder width={13} height={13} />
                 </button>
-              )}
+                <input
+                  className="hotkey-input"
+                  value={stopHotkey}
+                  placeholder="停止热键 如 F9"
+                  title="全局停止热键：任意窗口按它停掉所有脚本（留空 = 禁用，回车/失焦生效）"
+                  onChange={(e) => setStopHotkey(e.target.value)}
+                  onBlur={saveStopHotkey}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  }}
+                />
+                {lines.length > 0 && (
+                  <button className="icon-btn" title="清空日志" onClick={() => setLines([])}>
+                    <IconClose width={13} height={13} />
+                  </button>
+                )}
+              </span>
             </div>
             <div className="script-log-body" ref={logRef}>
               {lines.length === 0 && <span className="out">运行日志会显示在这里…（错误日志可点击跳到对应行）</span>}

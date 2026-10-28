@@ -244,6 +244,18 @@ export interface AppSettings {
    * 用于"成功/失败提示只报一次"，跨重启也不会重复弹。
    */
   lastUpdateNotice: string
+  /**
+   * 脚本运行日志是否追加写入本地文件（默认关）。
+   * 开启后脚本面板的「运行日志」（开始/日志/完成/停止/报错）逐行落到
+   * `logs/scripts/<日期>.log`，方便事后排查脚本为什么没跑/报错。
+   */
+  scriptLogToFile: boolean
+  /**
+   * 全局「停止全部脚本」热键（Electron accelerator 格式，如 `F9`、`CommandOrControl+Shift+K`）。
+   * 空串 = 不注册。按一下立即停掉所有运行中的 JS 脚本与 Python 脚本，面板关着、
+   * 窗口没焦点也生效——给"脚本停不下来"兜底。
+   */
+  scriptStopHotkey: string
 }
 
 /** 自更新状态（与主进程 update-service 的状态机一一对应） */
