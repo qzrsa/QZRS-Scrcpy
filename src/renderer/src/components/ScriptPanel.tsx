@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import type { PyRunEvent, PyScriptFile, ScriptInfo, ScriptRunEvent } from '@shared/types'
 import { Drawer } from './Drawer'
-import { IconCamera, IconClose, IconFolder, IconPlay, IconPlus, IconRecord, IconRefresh, IconScript, IconStop, IconTrash } from './icons'
+import { IconCamera, IconClose, IconCopy, IconDownload, IconFolder, IconPlay, IconPlus, IconRecord, IconRefresh, IconScript, IconStop, IconTrash, IconUpload } from './icons'
 
 interface Props {
   /** 当前活跃会话（投屏开着才有）；脚本通过它把指令发到设备 */
@@ -114,10 +114,20 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
       return '30'
     }
   })
+  // ---- 循环限次：留空 = 不限（跑到点停止）；填了 N 就跑满 N 轮自动停 ----
+  const [loopCountText, setLoopCountText] = useState<string>(() => {
+    try {
+      return localStorage.getItem('script-loop-count') || ''
+    } catch {
+      return ''
+    }
+  })
   /** 秒 → ms（1 秒 ~ 24 小时；空/非法回落到 30 秒） */
   const loopMs = loopOn
     ? Math.max(1, Math.min(86400, Math.round(Number(loopSecText) || 30))) * 1000
     : 0
+  /** 循环限次（正整数；空/非法 = 0 = 不限） */
+  const maxRounds = loopOn ? Math.max(0, Math.trunc(Number(loopCountText) || 0)) : 0
   // ---- Python 脚本（scripts/python/*.py，独立进程运行）----
   const [pyScripts, setPyScripts] = useState<PyScriptFile[]>([])
   const [pyDir, setPyDir] = useState('')
@@ -319,6 +329,36 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
     }
   }
 
+  /** 复制脚本：以「原名 (副本)」新建一份，内容相同、id 全新 */
+  const copyScript = async (s: ScriptInfo): Promise<void> => {
+    const r = await window.api.saveScript('', `${s.name} (副本)`, s.code)
+    if (r.ok) {
+      setScripts(r.scripts ?? [])
+      onToast(`已复制为「${(r.scripts ?? []).find((x) => x.id === r.id)?.name ?? s.name}」`, 'success')
+    } else {
+      onToast(r.message || '复制失败', 'error')
+    }
+  }
+
+  /** 导出当前选中脚本为 json 文件 */
+  const exportScript = async (): Promise<void> => {
+    if (!selectedId) return
+    const r = await window.api.exportScript(selectedId)
+    if (!r.ok) onToast(r.message || '导出失败', 'error')
+    else onToast('已导出', 'success')
+  }
+
+  /** 从 json 导入脚本（可多选文件内容里的脚本数组） */
+  const importScript = async (): Promise<void> => {
+    const r = await window.api.importScript()
+    if (r.ok) {
+      setScripts(r.scripts ?? [])
+      onToast(`已导入 ${r.added ?? 0} 个脚本`, 'success')
+    } else if (r.message !== '已取消') {
+      onToast(r.message || '导入失败', 'error')
+    }
+  }
+
   const run = async (): Promise<void> => {
     if (!sessionId) return
     // ⚠️ 不能直接读 selectedId：新建脚本时它是 null，保存后才拿到 id，
@@ -336,9 +376,15 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
       target = r.id ?? target
     }
     if (!target) return
-    const r = await window.api.runScript(target, sessionId, loopMs)
+    const r = await window.api.runScript(target, sessionId, loopMs, maxRounds)
     if (!r.ok) onToast(r.message || '运行失败', 'error')
-    else if (loopMs > 0) onToast(`开始循环：每 ${loopMs / 1000} 秒执行一遍，点停止结束`, 'info')
+    else if (loopMs > 0)
+      onToast(
+        maxRounds > 0
+          ? `开始循环：每 ${loopMs / 1000} 秒一遍，跑满 ${maxRounds} 轮自动停`
+          : `开始循环：每 ${loopMs / 1000} 秒执行一遍，点停止结束`,
+        'info'
+      )
     void syncRuns()
   }
 
@@ -520,6 +566,16 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
                 <IconScript width={14} height={14} />
                 <span className="script-item-name">{s.name}</span>
                 {runningIds.has(s.id) && <span className="script-run-dot" title="运行中" />}
+                <button
+                  className="icon-btn tpl-del"
+                  title="复制脚本（副本）"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    void copyScript(s)
+                  }}
+                >
+                  <IconCopy width={13} height={13} />
+                </button>
               </div>
             ))}
           </div>
@@ -621,7 +677,11 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
                 className="btn btn-primary"
                 onClick={() => void run()}
                 disabled={!code.trim() || !sessionId}
-                title={loopMs > 0 ? `运行（循环：每 ${loopMs / 1000} 秒一遍）Ctrl+Enter` : '运行（Ctrl+Enter）'}
+                title={
+                  loopMs > 0
+                    ? `运行（循环：每 ${loopMs / 1000} 秒一遍${maxRounds > 0 ? `，跑满 ${maxRounds} 轮` : ''}）Ctrl+Enter`
+                    : '运行（Ctrl+Enter）'
+                }
               >
                 运行
               </button>
@@ -663,8 +723,34 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
                 }}
               />
               秒
+              <input
+                className="loop-sec"
+                type="number"
+                min={1}
+                max={100000}
+                value={loopCountText}
+                disabled={!loopOn}
+                placeholder="不限"
+                aria-label="循环次数（留空 = 不限）"
+                title="循环次数：留空 = 不限（跑到点停止）；填 N = 跑满 N 轮自动停"
+                onChange={(e) => {
+                  setLoopCountText(e.target.value)
+                  try {
+                    localStorage.setItem('script-loop-count', e.target.value)
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+              />
+              次
             </label>
             <span className="toolbar-sep" />
+            <button className="icon-btn" onClick={() => void exportScript()} disabled={!selectedId} title="导出当前脚本为 json 文件">
+              <IconUpload width={16} height={16} />
+            </button>
+            <button className="icon-btn" onClick={() => void importScript()} title="从 json 导入脚本">
+              <IconDownload width={16} height={16} />
+            </button>
             <button className="icon-btn" onClick={onStartRecord} title="录制：在投屏窗口里操作，自动转成脚本代码">
               <IconRecord width={16} height={16} />
             </button>

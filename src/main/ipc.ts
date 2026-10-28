@@ -985,12 +985,15 @@ export function registerIpc(store: Store): AppManager {
 
   // 运行脚本：渲染层把目标会话 sessionId 发过来（一个脚本同一时间只跑一份）。
   // 引擎把 started/log/done/stopped/error 通过 'script:event' 推给渲染层。
-  ipcMain.handle('scripts:run', (_e, scriptId: string, sessionId: string, loopMs?: number) => {
+  ipcMain.handle('scripts:run', (_e, scriptId: string, sessionId: string, loopMs?: number, maxRounds?: number) => {
     try {
       const script = store.getScripts().find((s) => s.id === String(scriptId))
       if (!script) return { ok: false, message: '脚本不存在' }
-      // loopMs > 0 = 录制宏的「每 N 秒重播一遍」，由引擎包成 while 循环
-      const { runId } = scriptEngine.run(script, String(sessionId), { loopMs: Number(loopMs) || 0 })
+      // loopMs > 0 = 录制宏的「每 N 秒重播一遍」，由引擎包成 while 循环；maxRounds 跑满即停
+      const { runId } = scriptEngine.run(script, String(sessionId), {
+        loopMs: Number(loopMs) || 0,
+        maxRounds: Number(maxRounds) || 0
+      })
       return { ok: true, runId }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }
@@ -1007,6 +1010,80 @@ export function registerIpc(store: Store): AppManager {
   ipcMain.handle('scripts:openDir', () => {
     void shell.openPath(store.getScriptsDir())
     return { ok: true, dir: store.getScriptsDir() }
+  })
+
+  // 导出单个脚本为 json 文件（默认落在「文档」目录，文件名取脚本名）。
+  // ⚠️ 不要把默认路径放进 scripts/ 目录：那里每脚本一个文件，setScripts 保存时会
+  //    清掉目录里不在 keep 集合中的 json，导出的备份文件会被误删。
+  ipcMain.handle('scripts:export', async (_e, id: string) => {
+    const script = store.getScripts().find((s) => s.id === String(id))
+    if (!script) return { ok: false, message: '脚本不存在' }
+    const safe = (script.name || 'script').replace(/[\\/:*?"<>|]/g, '_').slice(0, 60)
+    const win = getWin()
+    const saveOpts: SaveDialogOptions = {
+      title: '导出脚本',
+      defaultPath: join(app.getPath('documents'), `${safe}.json`),
+      filters: [{ name: '脚本', extensions: ['json'] }]
+    }
+    const res = win ? await dialog.showSaveDialog(win, saveOpts) : await dialog.showSaveDialog(saveOpts)
+    if (res.canceled || !res.filePath) return { ok: false, message: '已取消' }
+    try {
+      writeFileSync(
+        res.filePath,
+        JSON.stringify({ type: 'qzrs-script', version: 1, name: script.name, code: script.code, updatedAt: script.updatedAt }, null, 2),
+        'utf8'
+      )
+      return { ok: true, path: res.filePath }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // 从 json 导入脚本：兼容单脚本对象和脚本数组；id 一律重新生成、同名自动改名。
+  ipcMain.handle('scripts:import', async () => {
+    const win = getWin()
+    const openOpts: OpenDialogOptions = {
+      title: '导入脚本',
+      filters: [{ name: '脚本', extensions: ['json'] }],
+      properties: ['openFile']
+    }
+    const res = win ? await dialog.showOpenDialog(win, openOpts) : await dialog.showOpenDialog(openOpts)
+    if (res.canceled || res.filePaths.length === 0) return { ok: false, message: '已取消' }
+    try {
+      const raw: unknown = JSON.parse(readFileSync(res.filePaths[0], 'utf8'))
+      const incoming = (Array.isArray(raw) ? raw : [raw]) as Array<{ name?: unknown; code?: unknown }>
+      const list = store.getScripts()
+      const names = new Set(list.map((s) => s.name))
+      const added: ScriptInfo[] = []
+      const now = Date.now()
+      for (const item of incoming) {
+        if (!item || typeof item !== 'object') continue
+        const code = typeof item.code === 'string' ? item.code : ''
+        if (code.trim().length === 0 || code.length > 100_000) continue
+        const baseName = (typeof item.name === 'string' && item.name.trim() ? item.name.trim() : '导入的脚本').slice(0, 40)
+        let unique = baseName
+        if (names.has(baseName)) {
+          unique = `${baseName} (导入)`
+          let n = 2
+          while (names.has(unique)) {
+            unique = `${baseName} (导入${n})`
+            n += 1
+          }
+        }
+        names.add(unique)
+        added.push({
+          id: `sc${now.toString(36)}${added.length.toString(36)}${Math.floor(Math.random() * 1e4).toString(36)}`,
+          name: unique,
+          code,
+          updatedAt: now
+        })
+      }
+      if (added.length === 0) return { ok: false, message: '文件中没有有效的脚本' }
+      const next = store.setScripts([...list, ...added])
+      return { ok: true, scripts: next, added: added.length }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   // ---- Python 脚本（scripts/python/*.py，独立进程运行）----

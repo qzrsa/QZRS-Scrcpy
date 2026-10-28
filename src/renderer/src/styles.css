@@ -1276,7 +1276,8 @@ body.drawer-resizing {
   flex-shrink: 0;
 }
 
-.tpl-item:hover .tpl-del {
+.tpl-item:hover .tpl-del,
+.script-item:hover .tpl-del {
   opacity: 1;
 }
 

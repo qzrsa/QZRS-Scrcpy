@@ -133,10 +133,22 @@ const api = {
   /**
    * 运行脚本：传目标会话 sessionId（投屏开着才有会话）。
    * `loopMs > 0` = 跑完一轮后等这么久再从头跑，直到停止（录制宏用）。
+   * `maxRounds > 0` = 循环模式下跑满这么多轮后自动结束（0 = 不限）。
    */
-  runScript: (scriptId: string, sessionId: string, loopMs = 0): Promise<{ ok: boolean; runId?: string; message?: string }> =>
-    ipcRenderer.invoke('scripts:run', scriptId, sessionId, loopMs),
+  runScript: (
+    scriptId: string,
+    sessionId: string,
+    loopMs = 0,
+    maxRounds = 0
+  ): Promise<{ ok: boolean; runId?: string; message?: string }> =>
+    ipcRenderer.invoke('scripts:run', scriptId, sessionId, loopMs, maxRounds),
   stopScript: (runId: string): Promise<OpResult> => ipcRenderer.invoke('scripts:stop', runId),
+  /** 导出单个脚本为 json 文件（默认落在文档目录） */
+  exportScript: (id: string): Promise<{ ok: boolean; path?: string; message?: string }> =>
+    ipcRenderer.invoke('scripts:export', id),
+  /** 从 json 导入脚本（兼容单脚本/数组；同名自动改名） */
+  importScript: (): Promise<{ ok: boolean; scripts?: ScriptInfo[]; added?: number; message?: string }> =>
+    ipcRenderer.invoke('scripts:import'),
   runningScripts: (): Promise<Array<{ runId: string; scriptId: string; name: string; sessionId: string }>> =>
     ipcRenderer.invoke('scripts:running'),
   openScriptsDir: (): Promise<{ ok: boolean; dir?: string }> => ipcRenderer.invoke('scripts:openDir'),

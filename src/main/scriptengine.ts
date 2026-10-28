@@ -120,6 +120,8 @@ interface RunState {
   stopped: boolean
   /** >0 = 整段脚本循环跑，每轮结束后等这么多毫秒（录制宏的"每隔 N 秒执行一次"） */
   loopMs: number
+  /** >0 = 循环跑满 N 轮后自动结束（0 = 不限，跑到点「停止」为止） */
+  maxRounds: number
   /** 挂起的定时器（stop 时提前唤醒） */
   timers: Set<NodeJS.Timeout>
   /** 等待被唤醒的 stop 检查点（stop 时立即触发） */
@@ -138,6 +140,11 @@ export interface RunOptions {
    * 直到点「停止」。上限一天，避免手滑写成天文数字。
    */
   loopMs?: number
+  /**
+   * 循环限次：loopMs>0 时生效，跑满 maxRounds 轮后自动结束（0 = 不限）。
+   * 不循环（loopMs=0）时本字段无意义——脚本天然只跑一遍。
+   */
+  maxRounds?: number
 }
 
 export interface RunningScript {
@@ -249,6 +256,10 @@ export class ScriptEngine {
     // 下限 200ms：再短就不是"循环"而是死循环刷指令了（会把设备点乱）。
     const rawLoop = Number(opts?.loopMs ?? 0)
     const loopMs = Number.isFinite(rawLoop) && rawLoop > 0 ? Math.max(200, Math.min(86_400_000, Math.floor(rawLoop))) : 0
+    // 循环限次：只在 loopMs>0 时有意义；夹到 [1, 100000]，0 = 不限
+    const rawMax = Number(opts?.maxRounds ?? 0)
+    const maxRounds =
+      loopMs > 0 && Number.isFinite(rawMax) && rawMax > 0 ? Math.max(1, Math.min(100_000, Math.floor(rawMax))) : 0
 
     this.seq += 1
     const runId = `r${Date.now().toString(36)}${this.seq.toString(36)}`
@@ -259,6 +270,7 @@ export class ScriptEngine {
       sessionId,
       stopped: false,
       loopMs,
+      maxRounds,
       timers: new Set(),
       wake: new Set(),
       finger: null
@@ -334,9 +346,10 @@ export class ScriptEngine {
     const context = vm.createContext(api, { name: `qzrs-script-${st.runId}` })
     try {
       // 循环模式：整段用户代码当作循环体，每轮之间由 __qzrsLoopTick 等固定间隔。
-      // 用 while(true) 而不是 for，是因为循环次数由用户点「停止」决定。
+      // 用 while(true) 而不是 for，是因为循环次数通常由用户点「停止」决定；
+      // 设置了 maxRounds 时 __qzrsLoopTick 返回 true 触发 break，跑满 N 轮自动收尾。
       const body =
-        st.loopMs > 0 ? `while (true) {\n${code}\nawait __qzrsLoopTick(${st.loopMs})\n}` : code
+        st.loopMs > 0 ? `while (true) {\n${code}\nif (await __qzrsLoopTick(${st.loopMs})) break\n}` : code
       // 包一层 async IIFE：用户代码可以直接顶层 await（vm.Script 本身不支持 TLA）
       const wrapped = new vm.Script(`(async () => {\n${body}\n})()`, { filename: `${st.name}.js` })
       await wrapped.runInContext(context, { timeout: 5000 })
@@ -772,8 +785,14 @@ export class ScriptEngine {
        * 所以：记住目标墙钟时间 → 每 30 秒（或剩余时间，取小）醒一次 → 查 stop、
        * 按墙钟重算剩余 → 每 5 分钟打一行倒计时。
        */
-      __qzrsLoopTick: async (ms: unknown): Promise<void> => {
+      __qzrsLoopTick: async (ms: unknown): Promise<boolean> => {
         round += 1
+        // 限次：跑满 N 轮立即收尾，不再等下一轮间隔，也不打「第 N+1 轮开始」。
+        if (st.maxRounds > 0 && round >= st.maxRounds) {
+          this.emit(st, { state: 'log', line: `✔ 已跑满 ${round}/${st.maxRounds} 轮，循环结束` })
+          checkStop()
+          return true
+        }
         const wait = Math.max(0, Number(ms) || 0)
         const nextAt = Date.now() + wait
         this.emit(st, {
@@ -797,6 +816,7 @@ export class ScriptEngine {
           }
         }
         this.emit(st, { state: 'log', line: `▶ 第 ${round + 1} 轮开始（${clockOf(Date.now())}）` })
+        return false
       },
       /**
        * 截屏找图：等到模板出现在屏幕上为止（或超时）。
