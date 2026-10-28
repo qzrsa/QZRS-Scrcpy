@@ -401,7 +401,7 @@ export class Store {
 
   /** 保存 waitImage 模板（PNG 字节）。返回实际路径。 */
   saveTemplate(name: string, png: Buffer): string {
-    const safe = name.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40) || 'template'
+    const safe = name.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 40) || 'template'
     const dir = this.templatesDir()
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
     const path = join(dir, `${safe}.png`)
@@ -431,7 +431,7 @@ export class Store {
   /** 读模板 PNG 字节；不存在返回 null */
   readTemplate(name: string): Buffer | null {
     try {
-      const safe = name.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40)
+      const safe = name.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 40)
       const p = join(this.templatesDir(), `${safe}.png`)
       if (!existsSync(p)) return null
       return readFileSync(p)
@@ -443,7 +443,7 @@ export class Store {
   /** 删除模板 */
   deleteTemplate(name: string): void {
     try {
-      const safe = name.replace(/[\\/:*?"<>|\s]+/g, '_').slice(0, 40)
+      const safe = name.replace(/[\\/:*?"<>|]+/g, '_').slice(0, 40)
       const p = join(this.templatesDir(), `${safe}.png`)
       if (existsSync(p)) unlinkSync(p)
     } catch {

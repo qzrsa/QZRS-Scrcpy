@@ -35,10 +35,14 @@ interface TplItem {
 const TEMPLATE = `// 设备 API（坐标 = 视频像素坐标，与调试浮层一致）：
 //   tap(x, y, duration=60)          点按；duration 大 = 长按
 //   swipe(x1, y1, x2, y2, ms=300)   滑动
-//   text('hello')                   输入文本（支持中文）
+//   stick(xc, yc, xd, yd, ms)       推摇杆（DOWN 中心 → 推到方向 → 保持）
+//   text('hello')                   输入文本（≤300 字节）
+//   setClipboard('长文本', true)    写剪贴板 / 并粘贴（长文本用这个）
 //   key('BACK') / key(4)            按键（BACK HOME ENTER VOLUME_UP ... 或数字 keycode）
 //   wait(ms)                        等待
 //   waitImage('模板名')              截屏找图，等到出现（先点「截取模板」）
+//   getPixelColor(x, y)             读像素颜色 → { r, g, b, hex }
+//   findColor('#ff0000', {tolerance, region})  找色 → { found, x, y }
 //   log('...') / console.log('...') 输出日志
 // 顶层可直接 await，例：
 
@@ -56,7 +60,7 @@ const EDITOR_LINE_H = 19
 
 // ---- 语法高亮（轻量 tokenizer：注释 / 字符串 / 关键字 / 数字 / API 名）----
 const TOKEN_RE =
-  /(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\b(await|async|const|let|var|function|return|if|else|for|while|do|break|continue|new|true|false|null|undefined|try|catch|finally|throw|typeof|of|in|switch|case|default)\b|\b(\d+(?:\.\d+)?)\b|\b(tap|swipe|text|key|wait|waitImage|log|console)\b/g
+  /(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)|('(?:\\.|[^'\\\n])*'|"(?:\\.|[^"\\\n])*"|`(?:\\.|[^`\\])*`)|\b(await|async|const|let|var|function|return|if|else|for|while|do|break|continue|new|true|false|null|undefined|try|catch|finally|throw|typeof|of|in|switch|case|default)\b|\b(\d+(?:\.\d+)?)\b|\b(tap|swipe|stick|text|setClipboard|key|wait|waitImage|getPixelColor|findColor|touchDown|touchMove|touchUp|log|console)\b/g
 
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')

@@ -48,6 +48,21 @@ export interface ScriptEngineHooks {
     name: string,
     threshold: number
   ): Promise<{ found: boolean; x: number; y: number; score: number; screenW: number; screenH: number } | null>
+  /**
+   * getPixelColor 用：读「视频像素坐标」处的颜色（ipc 负责截屏 + 坐标换算）。
+   * null = 会话不存在 / 截屏失败。
+   */
+  getPixelColor(sessionId: string, videoX: number, videoY: number): Promise<{ r: number; g: number; b: number; hex: string } | null>
+  /**
+   * findColor 用：在「视频坐标系的 region」（null = 全屏）里找第一个容差内命中。
+   * 返回命中点视频坐标；null = 会话不存在 / 截屏失败；{found:false} 由引擎按无命中处理。
+   */
+  findColor(
+    sessionId: string,
+    rgb: { r: number; g: number; b: number },
+    tolerance: number,
+    region: { x: number; y: number; w: number; h: number } | null
+  ): Promise<{ found: boolean; x: number; y: number } | null>
 }
 
 /** 常用 Android keycode 名称表（脚本里 key('BACK') 之类用） */
@@ -429,18 +444,39 @@ export class ScriptEngine {
       })
     }
 
-    const pos = (v: unknown, what: string): number => {
+    /**
+     * 坐标解析 + 边界夹取。为什么必须夹：
+     * waitImage 超时返回 (-1,-1)、用户手写 tap(99999,99999) 这类越界值，
+     * 不夹就会把负数兜成 0（误触左上角）或把超大值直接发进 scrcpy 协议。
+     * 这里统一夹到 [0, 视频宽/高]，越界打一条 warning 日志（不中断脚本）。
+     */
+    const posX = (v: unknown, what: string): number => {
       const n = Number(v)
       if (!Number.isFinite(n)) throw new ScriptApiError(`${what} 坐标不是数字：${v}`)
-      return n
+      const { width } = size()
+      const c = Math.max(0, Math.min(width, Math.round(n)))
+      if (Math.round(n) !== c) {
+        this.emit(st, { state: 'log', line: `⚠ ${what} 坐标 ${Math.round(n)} 越界（视频宽 ${width}），已夹到 ${c}` })
+      }
+      return c
+    }
+    const posY = (v: unknown, what: string): number => {
+      const n = Number(v)
+      if (!Number.isFinite(n)) throw new ScriptApiError(`${what} 坐标不是数字：${v}`)
+      const { height } = size()
+      const c = Math.max(0, Math.min(height, Math.round(n)))
+      if (Math.round(n) !== c) {
+        this.emit(st, { state: 'log', line: `⚠ ${what} 坐标 ${Math.round(n)} 越界（视频高 ${height}），已夹到 ${c}` })
+      }
+      return c
     }
 
     const tapImpl = async (x: unknown, y: unknown, duration = 60): Promise<void> => {
       checkStop()
       // 手指还按着时不能再 tap：同一个 pointerId 再发 DOWN 是非法指令，设备侧状态会乱
       if (st.finger) throw new ScriptApiError('手指还按着（touchDown 之后要先 touchUp），不能接着 tap/swipe')
-      const px = pos(x, 'x')
-      const py = pos(y, 'y')
+      const px = posX(x, 'x')
+      const py = posY(y, 'y')
       const d = Math.max(0, Number(duration) || 0)
       touch(0, px, py, 1) // DOWN
       if (d > 0) await sleep(d)
@@ -451,10 +487,10 @@ export class ScriptEngine {
     const swipeImpl = async (x1: unknown, y1: unknown, x2: unknown, y2: unknown, duration = 300): Promise<void> => {
       checkStop()
       if (st.finger) throw new ScriptApiError('手指还按着（touchDown 之后要先 touchUp），不能接着 tap/swipe')
-      const ax = pos(x1, 'x1')
-      const ay = pos(y1, 'y1')
-      const bx = pos(x2, 'x2')
-      const by = pos(y2, 'y2')
+      const ax = posX(x1, 'x1')
+      const ay = posY(y1, 'y1')
+      const bx = posX(x2, 'x2')
+      const by = posY(y2, 'y2')
       const dur = Math.min(60_000, Math.max(30, Number(duration) || 300))
       const steps = Math.max(2, Math.round(dur / SWIPE_STEP_MS))
       touch(0, ax, ay, 1) // DOWN
@@ -479,8 +515,8 @@ export class ScriptEngine {
     const touchDownImpl = async (x: unknown, y: unknown): Promise<void> => {
       checkStop()
       if (st.finger) throw new ScriptApiError('手指还按着（上一次 touchDown 没配 touchUp），先 touchUp() 再按')
-      const px = pos(x, 'x')
-      const py = pos(y, 'y')
+      const px = posX(x, 'x')
+      const py = posY(y, 'y')
       touch(0, px, py, 1)
       st.finger = { x: px, y: py }
     }
@@ -488,8 +524,8 @@ export class ScriptEngine {
     const touchMoveImpl = async (x: unknown, y: unknown): Promise<void> => {
       checkStop()
       if (!st.finger) throw new ScriptApiError('还没按下手指 —— 先 touchDown(x, y)')
-      const px = pos(x, 'x')
-      const py = pos(y, 'y')
+      const px = posX(x, 'x')
+      const py = posY(y, 'y')
       touch(2, px, py, 1)
       st.finger = { x: px, y: py }
     }
@@ -521,10 +557,10 @@ export class ScriptEngine {
     ): Promise<void> => {
       checkStop()
       if (st.finger) throw new ScriptApiError('手指还按着（先 touchUp() 再用 stick）')
-      const ax = pos(cx, 'x1')
-      const ay = pos(cy, 'y1')
-      const bx = pos(dirX, 'x2')
-      const by = pos(dirY, 'y2')
+      const ax = posX(cx, 'x1')
+      const ay = posY(cy, 'y1')
+      const bx = posX(dirX, 'x2')
+      const by = posY(dirY, 'y2')
       const hold = Math.min(60_000, Math.max(0, Number(holdMs) || 0))
 
       touch(0, ax, ay, 1) // DOWN：按在摇杆中心，游戏以这里为原点
@@ -611,6 +647,64 @@ export class ScriptEngine {
     const joinLogArgs = (args: unknown[]): string =>
       args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a) ?? String(a))).join(' ')
 
+    /** '#RRGGBB' / '#RGB' / {r,g,b} → {r,g,b}（各通道夹到 0~255） */
+    const parseColor = (v: unknown, what: string): { r: number; g: number; b: number } => {
+      const byte = (n: number): number => Math.max(0, Math.min(255, Math.round(n)))
+      if (typeof v === 'string') {
+        let s = v.trim().replace(/^#/, '')
+        if (s.length === 3) s = s.split('').map((c) => c + c).join('')
+        if (!/^[0-9a-fA-F]{6}$/.test(s)) {
+          throw new ScriptApiError(`${what} 颜色格式不对：${JSON.stringify(v)}（要 '#RRGGBB'，如 '#ff0000'）`)
+        }
+        return { r: parseInt(s.slice(0, 2), 16), g: parseInt(s.slice(2, 4), 16), b: parseInt(s.slice(4, 6), 16) }
+      }
+      if (v && typeof v === 'object') {
+        const o = v as { r?: unknown; g?: unknown; b?: unknown }
+        const r = Number(o.r)
+        const g = Number(o.g)
+        const b = Number(o.b)
+        if (![r, g, b].every((n) => Number.isFinite(n))) {
+          throw new ScriptApiError(`${what} 颜色对象要 {r,g,b} 三个数字`)
+        }
+        return { r: byte(r), g: byte(g), b: byte(b) }
+      }
+      throw new ScriptApiError(`${what} 颜色格式不对：${JSON.stringify(v)}（要 '#RRGGBB' 或 {r,g,b}）`)
+    }
+
+    /** 读视频坐标处像素颜色 → { r, g, b, hex } */
+    const getPixelColorImpl = async (x: unknown, y: unknown): Promise<{ r: number; g: number; b: number; hex: string }> => {
+      checkStop()
+      const px = posX(x, 'x')
+      const py = posY(y, 'y')
+      const c = await this.hooks.getPixelColor(st.sessionId, px, py)
+      if (!c) throw new ScriptApiError('读取像素失败（会话断开或截屏失败）')
+      return { r: c.r, g: c.g, b: c.b, hex: c.hex }
+    }
+
+    /** 在（视频坐标系）region 里找第一个容差内的颜色 → { found, x, y } */
+    const findColorImpl = async (
+      color: unknown,
+      opts?: unknown
+    ): Promise<{ found: boolean; x: number; y: number }> => {
+      checkStop()
+      const rgb = parseColor(color, 'findColor')
+      const o = (typeof opts === 'object' && opts !== null ? opts : {}) as { tolerance?: unknown; region?: unknown }
+      const tolerance = Math.min(255, Math.max(0, Number(o.tolerance) || 10))
+      let region: { x: number; y: number; w: number; h: number } | null = null
+      if (o.region && typeof o.region === 'object') {
+        const rg = o.region as { x?: unknown; y?: unknown; w?: unknown; h?: unknown }
+        region = {
+          x: posX(rg.x, 'region.x'),
+          y: posY(rg.y, 'region.y'),
+          w: Math.max(1, posX(rg.w, 'region.w')),
+          h: Math.max(1, posY(rg.h, 'region.h'))
+        }
+      }
+      const m = await this.hooks.findColor(st.sessionId, rgb, tolerance, region)
+      if (!m) throw new ScriptApiError('找色失败（会话断开或截屏失败）')
+      return m.found ? { found: true, x: m.x, y: m.y } : { found: false, x: -1, y: -1 }
+    }
+
     return {
       // ---- 基础 API（异步的都过 guard：不 await 也不产生 unhandledRejection）----
       /** 点按。duration>0 时为长按（按下后等 duration 再抬起）。 */
@@ -625,9 +719,20 @@ export class ScriptEngine {
         if (str.length === 0) throw new ScriptApiError('text() 需要非空文本')
         const bytes = Buffer.byteLength(str, 'utf8')
         if (bytes > 300) {
-          throw new ScriptApiError(`text() 超长：当前 ${bytes} 字节 > 上限 300 字节（中文每字 3 字节），请拆成多次 text() 或用 setClipboard 粘贴`)
+          throw new ScriptApiError(`text() 超长：当前 ${bytes} 字节 > 上限 300 字节（中文每字 3 字节），请拆成多次 text() 或用 setClipboard(text, true) 粘贴`)
         }
         this.hooks.sendControl(st.sessionId, { type: 'text', text: str })
+      },
+      /**
+       * 设置设备剪贴板（并可选自动粘贴）。长文本用这个，不受 text() 的 300 字节限制。
+       *   await setClipboard('很长的文本…')        // 只写剪贴板
+       *   await setClipboard('很长的文本…', true)  // 写剪贴板并立即在设备上粘贴
+       */
+      setClipboard: (text: unknown, paste = false): void => {
+        checkStop()
+        const str = String(text ?? '')
+        if (str.length === 0) throw new ScriptApiError('setClipboard() 需要非空文本')
+        this.hooks.sendControl(st.sessionId, { type: 'setClipboard', text: str, paste: !!paste })
       },
       /** 按键：key('BACK') / key(4) / key('BACK', 500)=长按 500ms / key('A', 0, metastate) 组合键。 */
       key: (name: unknown, duration?: number, metastate?: number): Promise<void> => guard(keyImpl(name, duration, metastate)),
@@ -699,6 +804,21 @@ export class ScriptEngine {
        * 可选：waitImage('btn', { timeout: 15000, threshold: 0.85 })
        */
       waitImage: (name: unknown, opts?: unknown): Promise<WaitImageResult> => guard(waitImageImpl(name, opts)),
+      /**
+       * 读像素颜色：(x,y) 是视频坐标。
+       *   const c = await getPixelColor(540, 1200)   // { r, g, b, hex: '#rrggbb' }
+       */
+      getPixelColor: (x: unknown, y: unknown): Promise<{ r: number; g: number; b: number; hex: string }> =>
+        guard(getPixelColorImpl(x, y)),
+      /**
+       * 找色：在指定区域（默认全屏）找第一个容差内的颜色。
+       *   const p = await findColor('#ff0000')                       // 全屏找红
+       *   const p = await findColor({ r:255,g:0,b:0 }, { tolerance: 15, region: { x:0,y:0,w:540,h:1200 } })
+       * 返回 { found, x, y }（视频坐标）；未命中 found=false、x/y=-1。
+       * 颜色支持 '#RRGGBB' / '#RGB' / {r,g,b}；tolerance 0~255（默认 10，RGB 三通道各自容差）。
+       */
+      findColor: (color: unknown, opts?: unknown): Promise<{ found: boolean; x: number; y: number }> =>
+        guard(findColorImpl(color, opts)),
       /** 输出一行日志到脚本面板。 */
       log: (...args: unknown[]): void => {
         this.emit(st, { state: 'log', line: joinLogArgs(args) })

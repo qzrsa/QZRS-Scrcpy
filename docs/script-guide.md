@@ -225,6 +225,43 @@ await waitImage('start_btn', { timeout: 15000, interval: 500, threshold: 0.85 })
 
 > ⚠️ 模板尽量框**按钮本体**而不是整块屏幕：框越小越准，也别框纯色区域（纯色没法定位）。设备分辨率设置改过之后，旧模板要重新截。
 
+### `getPixelColor(x, y)` / `findColor(color, opts?)` — 读色 / 找色
+
+找图（waitImage）对**纯色 / 低纹理**区域不灵（血条、纯色按钮、状态灯）。这两个 API 直接比颜色：
+
+```js
+// 读一个点的颜色（视频坐标）
+const c = await getPixelColor(540, 1200)
+log(c)   // { r: 255, g: 0, b: 0, hex: '#ff0000' }
+if (c.r > 200) log('这个点是红的')
+
+// 全屏找第一个红色（容差 15）
+const p = await findColor('#ff0000', { tolerance: 15 })
+if (p.found) await tap(p.x, p.y)
+
+// 只在左上 1/4 区域找，颜色用 {r,g,b} 也行
+const q = await findColor({ r: 255, g: 0, b: 0 }, {
+  tolerance: 20,
+  region: { x: 0, y: 0, w: 540, h: 1200 }
+})
+```
+
+- `color` 支持 `'#RRGGBB'`、`'#RGB'`（自动补全）、`{ r, g, b }`
+- `tolerance`：0~255（默认 10），RGB 三通道各自容差。画面有色差/渐变就调大
+- `region`：视频坐标的矩形 `{x,y,w,h}`，省略 = 全屏。找色比找图快得多，区域越限定越快
+- `findColor` 未命中返回 `{ found:false, x:-1, y:-1 }`，和 waitImage 一样**不报错**
+
+### `setClipboard(text, paste?)` — 写剪贴板 / 粘贴
+
+`text()` 只能发 300 字节（中文每字 3 字节），长文本（激活码、长 URL、整段话）用剪贴板：
+
+```js
+await setClipboard('很长的文本……')        // 只写进设备剪贴板
+await setClipboard('很长的文本……', true)  // 写剪贴板并立即在设备上触发「粘贴」
+```
+
+> 想先写进去、过会儿在某个输入框手动/脚本再粘，用不带 `paste` 的版本；要一步到位就 `paste: true`。
+
 ### `log(...)` / `console.log(...)` — 输出日志
 
 ```js
@@ -415,6 +452,8 @@ touchDown(x, y)                      // 手指按下不抬（低层，一般用 
 touchMove(x, y)                      // 按住移动（方向要这样才算得出来）
 touchUp()                            // 抬起（幂等，引擎也会自动兜底抬）
 text('内容')                         // 输入文本（≤300 字节，支持中文）
+setClipboard('长文本')               // 写设备剪贴板
+setClipboard('长文本', true)         // 写剪贴板并立即粘贴
 key('BACK')                          // 按键（见上方名称表）
 key('POWER', ms)                     // 长按按键 ms 毫秒
 key('E', 0, 4096)                    // metastate 组合键（4096=Ctrl）
@@ -422,6 +461,8 @@ key(4)                               // 直接用 Android keycode
 wait(ms)                             // 等待（≤10 分钟）
 const p = await waitImage('图名')     // 截屏找图等到出现（≤120 秒）
                                      // p.found ? tap(p.x, p.y) : 跳过
+const c = await getPixelColor(x, y)   // 读像素颜色 → { r,g,b,hex }
+const q = await findColor('#ff0000')  // 找色 → { found,x,y }（可选 {tolerance,region}）
 log('...')                           // 输出日志
 ```
 

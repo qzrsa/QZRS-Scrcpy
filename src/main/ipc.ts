@@ -364,6 +364,73 @@ export function registerIpc(store: Store): AppManager {
     return { found: true, x: m.x, y: m.y, score: m.score, screenW: shotSize.width, screenH: shotSize.height }
   }
 
+  // 找色/读色共用：截屏 → BGRA 位图 + 尺寸（会话不存在/截屏失败返回 null）
+  const captureBitmap = async (sessionId: string): Promise<{ bmp: Uint8Array; width: number; height: number } | null> => {
+    const { nativeImage } = await import('electron')
+    const h = sessions.get(sessionId)
+    if (!h) return null
+    const shot = await ensureAdb().screencap(h.serial)
+    const img = nativeImage.createFromBuffer(shot)
+    if (img.isEmpty()) return null
+    const size = img.getSize()
+    return { bmp: new Uint8Array(img.toBitmap()), width: size.width, height: size.height }
+  }
+
+  // 读「视频像素坐标」处的颜色（视频坐标 → 截屏坐标换算，截屏原始分辨率 vs 视频 maxSize 缩放）
+  const getPixelColor = async (
+    sessionId: string,
+    videoX: number,
+    videoY: number
+  ): Promise<{ r: number; g: number; b: number; hex: string } | null> => {
+    const vid = videoSizes.get(sessionId)
+    const cap = await captureBitmap(sessionId)
+    if (!vid || !cap || cap.width <= 0 || cap.height <= 0) return null
+    const sx = Math.min(cap.width - 1, Math.max(0, Math.round((videoX * cap.width) / vid.width)))
+    const sy = Math.min(cap.height - 1, Math.max(0, Math.round((videoY * cap.height) / vid.height)))
+    const i = (sy * cap.width + sx) * 4
+    const b = cap.bmp[i]
+    const g = cap.bmp[i + 1]
+    const r = cap.bmp[i + 2] // toBitmap 是 BGRA 顺序
+    const hex = '#' + [r, g, b].map((n) => n.toString(16).padStart(2, '0')).join('')
+    return { r, g, b, hex }
+  }
+
+  // 在（视频坐标系）region 里找第一个容差内命中；返回命中点视频坐标
+  const findColor = async (
+    sessionId: string,
+    rgb: { r: number; g: number; b: number },
+    tolerance: number,
+    region: { x: number; y: number; w: number; h: number } | null
+  ): Promise<{ found: boolean; x: number; y: number } | null> => {
+    const vid = videoSizes.get(sessionId)
+    const cap = await captureBitmap(sessionId)
+    if (!vid || !cap || cap.width <= 0 || cap.height <= 0) return null
+    const sx = (vx: number): number => Math.min(cap.width, Math.max(0, Math.round((vx * cap.width) / vid.width)))
+    const sy = (vy: number): number => Math.min(cap.height, Math.max(0, Math.round((vy * cap.height) / vid.height)))
+    let x0 = 0
+    let y0 = 0
+    let x1 = cap.width
+    let y1 = cap.height
+    if (region) {
+      x0 = sx(region.x)
+      y0 = sy(region.y)
+      x1 = sx(region.x + region.w)
+      y1 = sy(region.y + region.h)
+    }
+    const tol = Math.max(0, Math.trunc(tolerance))
+    const { bmp, width } = cap
+    for (let y = y0; y < y1; y++) {
+      const row = y * width * 4
+      for (let x = x0; x < x1; x++) {
+        const i = row + x * 4
+        if (Math.abs(bmp[i] - rgb.b) <= tol && Math.abs(bmp[i + 1] - rgb.g) <= tol && Math.abs(bmp[i + 2] - rgb.r) <= tol) {
+          return { found: true, x: Math.round((x * vid.width) / cap.width), y: Math.round((y * vid.height) / cap.height) }
+        }
+      }
+    }
+    return { found: false, x: -1, y: -1 }
+  }
+
   const scriptEngine = new ScriptEngine({
     sendControl: (sessionId, cmd) => {
       const h = sessions.get(sessionId)
@@ -372,7 +439,9 @@ export function registerIpc(store: Store): AppManager {
     getVideoSize: (sessionId) => videoSizes.get(sessionId) ?? null,
     isSessionAlive: (sessionId) => sessions.has(sessionId),
     onEvent: (evt) => send('script:event', evt),
-    findTemplate
+    findTemplate,
+    getPixelColor,
+    findColor
   })
 
   // ---- Python 外挂桥 ----
