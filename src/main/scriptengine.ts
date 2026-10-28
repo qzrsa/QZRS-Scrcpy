@@ -1,5 +1,6 @@
 import vm from 'node:vm'
 import type { ControlCommand, ScriptInfo, ScriptRunEvent, WaitImageResult } from '@shared/types'
+import type { OcrResult } from './ocr'
 
 /**
  * 脚本执行引擎：把用户 JS 放进 node:vm 沙箱，以 async IIFE 运行。
@@ -63,6 +64,12 @@ export interface ScriptEngineHooks {
     tolerance: number,
     region: { x: number; y: number; w: number; h: number } | null
   ): Promise<{ found: boolean; x: number; y: number } | null>
+  /**
+   * ocrText 用：对指定区域（视频坐标，null = 全屏）做 OCR 文字识别。
+   * 返回 lines 的 box 是**视频坐标**（引擎已换算好，脚本可直接 tap）。
+   * null = 会话不存在 / 截屏失败 / 模型未就绪。
+   */
+  ocrText(sessionId: string, region: { x: number; y: number; w: number; h: number } | null): Promise<OcrResult | null>
 }
 
 /** 常用 Android keycode 名称表（脚本里 key('BACK') 之类用） */
@@ -718,6 +725,32 @@ export class ScriptEngine {
       return m.found ? { found: true, x: m.x, y: m.y } : { found: false, x: -1, y: -1 }
     }
 
+    /** OCR 识别：ocrText(region?) 全屏或指定区域（视频坐标），返回文字与每行位置 */
+    const ocrTextImpl = async (
+      region?: unknown
+    ): Promise<{ text: string; lines: { text: string; score: number; x: number; y: number; w: number; h: number }[] }> => {
+      checkStop()
+      let reg: { x: number; y: number; w: number; h: number } | null = null
+      if (region !== undefined && region !== null) {
+        if (typeof region !== 'object') throw new ScriptApiError('ocrText() 参数要 {x,y,w,h} 或不传（全屏）')
+        const o = region as { x?: unknown; y?: unknown; w?: unknown; h?: unknown }
+        reg = {
+          x: posX(o.x ?? 0, 'region.x'),
+          y: posY(o.y ?? 0, 'region.y'),
+          w: Math.max(1, posX(o.w, 'region.w')),
+          h: Math.max(1, posY(o.h, 'region.h'))
+        }
+      }
+      const r = await this.hooks.ocrText(st.sessionId, reg)
+      if (!r) {
+        throw new ScriptApiError('OCR 失败（会话断开、截屏失败或模型未就绪）——请到「设置 → OCR 模型」下载模型')
+      }
+      return {
+        text: r.text,
+        lines: r.lines.map((l) => ({ text: l.text, score: l.score, x: l.box.x, y: l.box.y, w: l.box.w, h: l.box.h }))
+      }
+    }
+
     return {
       // ---- 基础 API（异步的都过 guard：不 await 也不产生 unhandledRejection）----
       /** 点按。duration>0 时为长按（按下后等 duration 再抬起）。 */
@@ -839,6 +872,16 @@ export class ScriptEngine {
        */
       findColor: (color: unknown, opts?: unknown): Promise<{ found: boolean; x: number; y: number }> =>
         guard(findColorImpl(color, opts)),
+      /**
+       * OCR 识别屏幕文字（PaddleOCR 本地模型，模型从设置里下载）。
+       *   const r = await ocrText()                        // 全屏识别
+       *   const r = await ocrText({ x:0, y:0, w:540, h:300 })  // 指定区域
+       *   if (r.text.includes('确认')) await tap(r.lines[0].x, r.lines[0].y)
+       * 返回 { text, lines: [{ text, score, x, y, w, h }] }（x/y/w/h 是视频坐标，可直接 tap）。
+       * ⚠️ 需先在「设置 → OCR 模型」下载模型；一次全屏识别约 1 秒，建议先框小区域再识别。
+       */
+      ocrText: (region?: unknown): Promise<{ text: string; lines: { text: string; score: number; x: number; y: number; w: number; h: number }[] }> =>
+        guard(ocrTextImpl(region)),
       /** 输出一行日志到脚本面板。 */
       log: (...args: unknown[]): void => {
         this.emit(st, { state: 'log', line: joinLogArgs(args) })

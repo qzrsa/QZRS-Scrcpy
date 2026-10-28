@@ -209,6 +209,9 @@ const api = {
   openOcrModelsDir: (): Promise<OpResult & { dir?: string }> => ipcRenderer.invoke('ocr:openDir'),
   /** 打开手动下载页（国内网盘；未配置时不动作） */
   openOcrManual: (): Promise<OpResult> => ipcRenderer.invoke('ocr:openManual'),
+  /** 测试识别：对第一个活动会话截屏识别（模型就绪 + 有会话时可用） */
+  testOcr: (): Promise<OpResult & { text?: string; lines?: number; elapsedMs?: number; width?: number; height?: number }> =>
+    ipcRenderer.invoke('ocr:test'),
   onOcrProgress: (cb: (p: { phase: 'downloading' | 'verifying' | 'done' | 'error'; percent: number; file?: string; filePercent?: number; message?: string }) => void): (() => void) => {
     const l = (_e: unknown, d: { phase: 'downloading' | 'verifying' | 'done' | 'error'; percent: number; file?: string; filePercent?: number; message?: string }): void => cb(d)
     ipcRenderer.on('ocr:progress', l)

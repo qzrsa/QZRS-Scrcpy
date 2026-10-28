@@ -260,6 +260,31 @@ const q = await findColor({ r: 255, g: 0, b: 0 }, {
 - `region`：视频坐标的矩形 `{x,y,w,h}`，省略 = 全屏。找色比找图快得多，区域越限定越快
 - `findColor` 未命中返回 `{ found:false, x:-1, y:-1 }`，和 waitImage 一样**不报错**
 
+### `ocrText(region?)` — 识别屏幕文字（OCR）
+
+找图 / 找色都不灵时（文字会变、颜色会变、内容会变），用 OCR 直接读屏幕上的字：
+
+```js
+// 全屏识别
+const r = await ocrText()
+log(r.text)                        // 所有文字，按行用 \n 拼起来
+if (r.text.includes('开始游戏')) log('找到了')
+
+// 只识别顶部一块（更快）
+const r2 = await ocrText({ x: 0, y: 0, w: 540, h: 300 })
+
+// 找到某一行文字后点它（lines 的坐标是视频坐标，可直接 tap）
+const hit = r.lines.find((l) => l.text.includes('领取'))
+if (hit) await tap(hit.x, hit.y)
+```
+
+- 返回 `{ text, lines }`：`text` 是全部文字（按阅读顺序用 `\n` 连接）；`lines` 是每行 `{ text, score, x, y, w, h }`，坐标是**视频坐标**，可直接 `tap(hit.x, hit.y)`
+- `region`：视频坐标矩形 `{x,y,w,h}`，省略 = 全屏。**框小区域能快很多**（全屏一次约 1 秒）
+- ⚠️ 需先在「设置 → OCR 模型」下载模型（约 16MB，一次性）；没下载时调用会报错提示去下载
+- 识别的是屏幕上的**可见文字**（按钮、数字、聊天等），不是内存里的数据
+
+> 典型用法：`waitImage` 找「大概位置」，`ocrText` 读「具体内容」（倒计时数字、道具数量、可变的公告文字）。
+
 ### `setClipboard(text, paste?)` — 写剪贴板 / 粘贴
 
 `text()` 只能发 300 字节（中文每字 3 字节），长文本（激活码、长 URL、整段话）用剪贴板：
@@ -472,6 +497,9 @@ const p = await waitImage('图名')     // 截屏找图等到出现（≤120 秒
                                      // p.found ? tap(p.x, p.y) : 跳过
 const c = await getPixelColor(x, y)   // 读像素颜色 → { r,g,b,hex }
 const q = await findColor('#ff0000')  // 找色 → { found,x,y }（可选 {tolerance,region}）
+const r = await ocrText()             // 全屏识别文字 → { text, lines }
+const r2 = await ocrText({x,y,w,h})   // 只识别指定区域（更快）
+                                     // r.lines[i] = { text,score,x,y,w,h }（视频坐标）
 log('...')                           // 输出日志
 ```
 

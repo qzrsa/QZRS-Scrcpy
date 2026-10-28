@@ -35,6 +35,9 @@ export function SettingsPanel({
   // OCR 模型状态 + 下载进度
   const [ocr, setOcr] = useState<Awaited<ReturnType<typeof window.api.getOcrStatus>> | null>(null)
   const [ocrProgress, setOcrProgress] = useState<{ phase: 'downloading' | 'verifying' | 'done' | 'error'; percent: number; file?: string; filePercent?: number; message?: string } | null>(null)
+  // OCR 测试识别结果
+  const [ocrTest, setOcrTest] = useState<{ ok: boolean; text?: string; lines?: number; elapsedMs?: number; message?: string } | null>(null)
+  const [ocrTesting, setOcrTesting] = useState(false)
   // 自更新状态（主进程快照，渲染层只读）
   const [upd, setUpd] = useState<UpdateSnapshot | null>(null)
   const [updErr, setUpdErr] = useState('')
@@ -59,6 +62,19 @@ export function SettingsPanel({
 
   const extra = useMemo(() => parseSubnets(extraText), [extraText])
   const extraInvalid = extra.errors.length > 0 || extra.overLimit
+
+  /** 测试识别：对当前投屏会话截屏识别，验证模型是否可用 */
+  const runOcrTest = async (): Promise<void> => {
+    setOcrTesting(true)
+    setOcrTest(null)
+    try {
+      setOcrTest(await window.api.testOcr())
+    } catch (e) {
+      setOcrTest({ ok: false, message: e instanceof Error ? e.message : String(e) })
+    } finally {
+      setOcrTesting(false)
+    }
+  }
 
   useEffect(() => {
     void window.api.resolvePaths().then(setResolved)
@@ -452,7 +468,7 @@ export function SettingsPanel({
         )}
 
         {/*
-          OCR 识别模型：脚本 findText/ocr 的底层能力。
+          OCR 识别模型：脚本 ocrText() 的底层能力。
           模型不进安装包（省 16MB + 支持后续独立升级），首次使用时在此按需下载。
         */}
         <div className="field row between">
@@ -473,7 +489,7 @@ export function SettingsPanel({
           </span>
         </div>
         <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-          供脚本使用「在屏幕上找文字 / 读取文字」（约 16MB，仅首次需要下载，下载到
+          供脚本使用 <code>ocrText()</code> 在屏幕上读取文字（约 16MB，仅首次需要下载，下载到
           {' '}
           <code style={{ userSelect: 'all' }}>{ocr?.dir || '<安装目录>\\ocr-models'}</code>
           ）。
@@ -512,7 +528,30 @@ export function SettingsPanel({
                 手动下载（网盘）
               </button>
             )}
+            <button className="btn" disabled={ocrTesting || ocr?.ready !== true} onClick={() => void runOcrTest()}>
+              {ocrTesting ? '识别中…' : '测试识别'}
+            </button>
           </div>
+          {ocrTest && (
+            <div style={{ marginTop: 6, fontSize: 12 }}>
+              {ocrTest.ok ? (
+                <>
+                  <span style={{ color: '#2ecc71' }}>
+                    ✓ 识别成功（{ocrTest.elapsedMs}ms，{ocrTest.lines} 行）
+                  </span>
+                  {ocrTest.text ? (
+                    <>
+                      ：<span style={{ userSelect: 'all' }}>{ocrTest.text}</span>
+                    </>
+                  ) : (
+                    '（未识别到文字）'
+                  )}
+                </>
+              ) : (
+                <span style={{ color: 'var(--red, #e74c3c)' }}>{ocrTest.message}</span>
+              )}
+            </div>
+          )}
         </div>
       </Section>
 

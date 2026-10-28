@@ -17,6 +17,7 @@ import { UpdateService } from './update-service'
 import { detectForm } from './updater'
 import { OcrModelDownloader, type OcrProgress } from './ocrdownload'
 import { ocrStatus as ocrModelsStatus, OCR_MANUAL_URL, resolveOcrModelDir } from './ocrmodels'
+import { OcrEngine, type OcrResult } from './ocr'
 import { bgraToRgba, matchTemplate, toGray } from './templatematch'
 import { themeBackground } from './theme'
 import { findAdb, findServer, findScrcpy } from './util'
@@ -443,6 +444,55 @@ export function registerIpc(store: Store): AppManager {
     return { found: false, x: -1, y: -1 }
   }
 
+  // OCR：截屏 → 视频坐标 region 换算成截屏坐标 → 按需 crop → OcrEngine 推理 → 坐标换算回视频。
+  // 会话不存在/截屏失败返回 null（引擎转成「OCR 失败」）；模型未就绪/推理失败抛错（脚本看到具体原因）。
+  const ocrText = async (
+    sessionId: string,
+    region: { x: number; y: number; w: number; h: number } | null
+  ): Promise<OcrResult | null> => {
+    const vid = videoSizes.get(sessionId)
+    const cap = await captureBitmap(sessionId)
+    if (!vid || !cap || cap.width <= 0 || cap.height <= 0) return null
+    const sx = (vx: number): number => Math.min(cap.width, Math.max(0, Math.round((vx * cap.width) / vid.width)))
+    const sy = (vy: number): number => Math.min(cap.height, Math.max(0, Math.round((vy * cap.height) / vid.height)))
+    let bgra = cap.bmp
+    let bw = cap.width
+    let bh = cap.height
+    let ox = 0
+    let oy = 0
+    if (region) {
+      const x0 = sx(region.x)
+      const y0 = sy(region.y)
+      const x1 = sx(region.x + region.w)
+      const y1 = sy(region.y + region.h)
+      const cw = Math.max(1, x1 - x0)
+      const ch = Math.max(1, y1 - y0)
+      const sub = new Uint8Array(cw * ch * 4)
+      for (let y = 0; y < ch; y++) {
+        const srcRow = (y0 + y) * cap.width * 4 + x0 * 4
+        sub.set(cap.bmp.subarray(srcRow, srcRow + cw * 4), y * cw * 4)
+      }
+      bgra = sub
+      bw = cw
+      bh = ch
+      ox = x0
+      oy = y0
+    }
+    const r = await ocrEngine.recognize(bgra, bw, bh)
+    const tx = (px: number): number => Math.round(((ox + px) * vid.width) / cap.width)
+    const ty = (py: number): number => Math.round(((oy + py) * vid.height) / cap.height)
+    const tw = (pw: number): number => Math.round((pw * vid.width) / cap.width)
+    const th = (ph: number): number => Math.round((ph * vid.height) / cap.height)
+    return {
+      text: r.text,
+      lines: r.lines.map((l) => ({
+        text: l.text,
+        score: l.score,
+        box: { x: tx(l.box.x), y: ty(l.box.y), w: tw(l.box.w), h: th(l.box.h) }
+      }))
+    }
+  }
+
   /** 把脚本运行事件转成一行可读文本（文案与脚本面板日志区一致，方便对着看） */
   const formatScriptEvent = (evt: ScriptRunEvent): string => {
     switch (evt.state) {
@@ -489,7 +539,8 @@ export function registerIpc(store: Store): AppManager {
     },
     findTemplate,
     getPixelColor,
-    findColor
+    findColor,
+    ocrText
   })
 
   // ---- Python 外挂桥 ----
@@ -732,6 +783,11 @@ export function registerIpc(store: Store): AppManager {
   // 模型不进安装包，设置里按需下载（GitHub Release 默认源，electron.net 走系统代理）。
   const ocrDownloader = new OcrModelDownloader()
   ocrDownloader.onProgress((p: OcrProgress) => send('ocr:progress', p))
+
+  // ---- OCR 推理引擎 ----
+  // 单例懒加载：模型文件由上面的下载器拉到本地模型目录，引擎用 onnxruntime-node 推理。
+  // 模型加载慢（det ~400ms），首次 ocrText 调用时才加载，之后常驻复用。
+  const ocrEngine = new OcrEngine(resolveOcrModelDir())
 
   // ---- session management ----
   function startSession(serial: string, opts: SessionOptions, reuseId?: string): { sessionId: string } {
@@ -1396,6 +1452,28 @@ export function registerIpc(store: Store): AppManager {
     if (!OCR_MANUAL_URL) return { ok: false, message: '未配置手动下载地址' }
     void shell.openExternal(OCR_MANUAL_URL)
     return { ok: true }
+  })
+  ipcMain.handle('ocr:test', async () => {
+    // 找第一个活动会话做一次真实识别（供设置面板「测试识别」验证模型是否可用）
+    const entry = [...sessions.entries()][0]
+    if (!entry) return { ok: false, message: '请先连接设备并开始投屏' }
+    const [sessionId] = entry
+    try {
+      const cap = await captureBitmap(sessionId)
+      if (!cap) return { ok: false, message: '截屏失败（会话可能已断开）' }
+      const t0 = Date.now()
+      const r = await ocrEngine.recognize(cap.bmp, cap.width, cap.height)
+      return {
+        ok: true,
+        text: r.text,
+        lines: r.lines.length,
+        elapsedMs: Date.now() - t0,
+        width: cap.width,
+        height: cap.height
+      }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
   })
 
   // ---- fullscreen ----
