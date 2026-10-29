@@ -25,7 +25,8 @@ import type {
   NetworkInfo,
   AppListResult,
   AppActionResult,
-  AppAction
+  AppAction,
+  AppIconResult
 } from '@shared/types'
 
 const api = {
@@ -70,6 +71,9 @@ const api = {
   /** 应用操作：启动 / 停止 / 卸载 / 清数据 / 详情 */
   appAction: (serial: string, action: AppAction, pkg: string): Promise<AppActionResult> =>
     ipcRenderer.invoke('device:apps:action', serial, action, pkg),
+  /** 取单个应用图标（懒加载，返回 base64 数据） */
+  appIcon: (serial: string, pkg: string): Promise<AppIconResult> =>
+    ipcRenderer.invoke('device:app:icon', serial, pkg),
   /** 开始拉取 logcat（流式，逐行经 onLogcatLine 推送） */
   startLogcat: (serial: string, filter: string): Promise<OpResult> =>
     ipcRenderer.invoke('device:logcat:start', serial, filter),

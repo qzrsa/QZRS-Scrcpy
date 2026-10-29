@@ -3076,6 +3076,33 @@ body.drawer-resizing {
   background: var(--bg-hover);
 }
 
+.appmgr-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-active);
+  color: var(--text-dim);
+  font-weight: 700;
+  font-size: 15px;
+  user-select: none;
+}
+
+.appmgr-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.appmgr-icon-ph {
+  line-height: 1;
+}
+
 .appmgr-row-main {
   flex: 1;
   min-width: 0;

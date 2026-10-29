@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppInfo, AppListResult } from '@shared/types'
 import {
   IconApps,
@@ -12,6 +12,9 @@ import {
 } from './icons'
 
 type Action = 'launch' | 'stop' | 'clear' | 'uninstall' | 'info'
+
+/** 应用图标缓存：serial|pkg → 图标（null = 加载失败，避免重复请求） */
+const iconCache = new Map<string, { mime: string; data: string } | null>()
 
 /** 待确认的危险操作（清数据 / 卸载） */
 interface ConfirmState {
@@ -126,6 +129,7 @@ export function AppManagerPanel({ serial }: { serial: string }): JSX.Element {
           const name = a.label || a.pkg
           return (
             <div className="appmgr-row" key={a.pkg}>
+              <AppIcon serial={serial} pkg={a.pkg} name={name} />
               <div className="appmgr-row-main">
                 <span className="appmgr-name" title={name}>
                   {name}
@@ -241,4 +245,57 @@ const ACTION_TEXT: Record<Action, string> = {
   clear: '清数据',
   uninstall: '卸载',
   info: '详情'
+}
+
+/**
+ * 应用图标（懒加载）：进入视口才从设备拉取图标（unzip APK 里的 ic_launcher），
+ * 结果进模块级缓存，滚动回来不重复请求；加载前/失败时显示应用名首字母占位。
+ */
+function AppIcon({ serial, pkg, name }: { serial: string; pkg: string; name: string }): JSX.Element {
+  const key = `${serial}|${pkg}`
+  const [icon, setIcon] = useState<{ mime: string; data: string } | null | undefined>(() =>
+    iconCache.get(key)
+  )
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    // 已缓存（含失败 = null）就直接用，不再请求
+    if (iconCache.has(key)) {
+      setIcon(iconCache.get(key) ?? null)
+      return
+    }
+    const el = ref.current
+    if (!el) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          io.disconnect()
+          void window.api
+            .appIcon(serial, pkg)
+            .then((r) => {
+              const v = r.ok && r.data ? { mime: r.mime || 'image/png', data: r.data } : null
+              iconCache.set(key, v)
+              setIcon(v)
+            })
+            .catch(() => {
+              iconCache.set(key, null)
+              setIcon(null)
+            })
+        }
+      },
+      { rootMargin: '120px' }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [key, serial, pkg])
+
+  return (
+    <div className="appmgr-icon" ref={ref}>
+      {icon ? (
+        <img src={`data:${icon.mime};base64,${icon.data}`} alt="" draggable={false} />
+      ) : (
+        <span className="appmgr-icon-ph">{name ? name.slice(0, 1).toUpperCase() : '?'}</span>
+      )}
+    </div>
+  )
 }

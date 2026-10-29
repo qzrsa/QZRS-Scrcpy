@@ -41,6 +41,7 @@ import type {
   AppListResult,
   AppActionResult,
   AppAction,
+  AppIconResult,
   SysStorage
 } from '@shared/types'
 
@@ -140,6 +141,20 @@ function parseDfLine(line: string): SysStorage | null {
     used: parts[parts.length - 4],
     total: parts[parts.length - 5]
   }
+}
+
+/** 根据图片二进制魔数判断 mime（应用图标可能是 png/webp/jpeg） */
+function detectImageMime(buf: Buffer): string {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) {
+    return 'image/png'
+  }
+  if (buf.length >= 12 && buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp'
+  }
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) {
+    return 'image/jpeg'
+  }
+  return 'image/png'
 }
 
 /** 解析系统信息命令的原始输出 */
@@ -1363,7 +1378,7 @@ export function registerIpc(store: Store): AppManager {
         : [
             "pm list packages -3 2>/dev/null | sed 's/package://' | while read -r p; do",
             "  printf '%s|' \"$p\"",
-            '  cmd package resolve-activity --brief -c android.intent.category.LAUNCHER "$p" 2>/dev/null | grep -m1 "^label=" | sed "s/^label=//"',
+            '  cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$p" 2>/dev/null | grep -m1 "^label=" | sed "s/^label=//"',
             'done'
           ].join('\n')
       const r = await a.shell(serial, listCmd, 60000)
@@ -1412,7 +1427,7 @@ export function registerIpc(store: Store): AppManager {
           break
         case 'info':
           cmd = [
-            `echo "label=$(cmd package resolve-activity --brief -c android.intent.category.LAUNCHER ${p} 2>/dev/null | grep -m1 '^label=' | sed 's/^label=//')"`,
+            `echo "label=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER ${p} 2>/dev/null | grep -m1 '^label=' | sed 's/^label=//')"`,
             `dumpsys package ${p} | grep -E 'versionName=|versionCode=|userId=|firstInstallTime=|lastUpdateTime='`
           ].join('\n')
           break
@@ -1427,6 +1442,28 @@ export function registerIpc(store: Store): AppManager {
       return { ok, message: ok ? (out || '成功') : (err || out || `执行失败（exit ${r.code}）`), detail }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ---- 应用管理：取应用图标（懒加载，返回 base64）----
+  ipcMain.handle('device:app:icon', async (_e, serial: string, pkg: string) => {
+    try {
+      const a = ensureAdb()
+      const p = String(pkg || '').trim()
+      // 包名白名单（来自 pm list packages，只允许字母数字._），防命令注入
+      if (!/^[a-zA-Z0-9._]+$/.test(p)) return { ok: false, pkg: p, message: '非法包名' }
+      const script = [
+        `apk=$(pm path "${p}" 2>/dev/null | head -1 | sed 's/^package://')`,
+        // 在 APK（zip）里找 launcher 图标：ic_launcher*.png/webp，排除 adaptive 的 foreground 与 round
+        `icon=$(unzip -l "$apk" 2>/dev/null | awk '$NF ~ /ic_launcher[^/]*\\.(png|webp)$/ && $NF !~ /foreground|round/ {print $NF; exit}')`,
+        `if [ -n "$icon" ]; then unzip -p "$apk" "$icon" 2>/dev/null; fi`
+      ].join('\n')
+      const buf = await a.execOut(serial, script, 20000)
+      if (!buf || buf.length < 8) return { ok: false, pkg: p, message: '未找到图标' }
+      const mime = detectImageMime(buf)
+      return { ok: true, pkg: p, mime, data: buf.toString('base64') }
+    } catch (err) {
+      return { ok: false, pkg: String(pkg || ''), message: err instanceof Error ? err.message : String(err) }
     }
   })
 

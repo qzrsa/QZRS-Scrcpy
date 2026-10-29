@@ -601,3 +601,14 @@ export interface AppActionResult {
   /** info 操作返回的详情多行文本 */
   detail?: string
 }
+
+/** 应用图标（device:app:icon 返回，懒加载用） */
+export interface AppIconResult {
+  ok: boolean
+  pkg: string
+  message?: string
+  /** data URI 的 mime，如 image/png */
+  mime?: string
+  /** 图标二进制转 base64 */
+  data?: string
+}
