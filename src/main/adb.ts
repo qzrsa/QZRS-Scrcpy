@@ -565,6 +565,45 @@ export class AdbClient {
     return this.exec(['-s', serial, 'shell', command], timeoutMs)
   }
 
+  /**
+   * 流式执行 adb shell：每收到一行（stdout/stderr）就回调一次，不等待进程结束。
+   * 用于 logcat 这类持续输出的命令；返回子进程，调用方负责在结束时 kill。
+   */
+  streamShell(
+    serial: string,
+    command: string,
+    onLine: (line: string) => void,
+    onExit?: (code: number | null) => void
+  ): ChildProcess {
+    const child = spawn(this.path, ['-s', serial, 'shell', command], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    })
+    // 跨 chunk 累积缓冲区：logcat 高流量时一个 chunk 里大概率只含半行，不能把残行当整行回调
+    let pending = ''
+    const feed = (chunk: Buffer): void => {
+      pending += chunk.toString('utf8')
+      let i: number
+      while ((i = pending.indexOf('\n')) >= 0) {
+        onLine(pending.slice(0, i).replace(/\r$/, ''))
+        pending = pending.slice(i + 1)
+      }
+    }
+    child.stdout.on('data', (d: Buffer) => feed(d))
+    child.stderr.on('data', (d: Buffer) => feed(d))
+    child.on('error', (err) => {
+      onLine(`[adb error] ${err.message}`)
+      onExit?.(null)
+    })
+    child.on('close', (code) => {
+      // 进程退出时把最后残留的半行（如果有）也吐出去，避免丢尾行
+      if (pending) onLine(pending.replace(/\r$/, ''))
+      pending = ''
+      onExit?.(code ?? null)
+    })
+    return child
+  }
+
   /** Get device IP (for TCP/IP switching). */
   async getDeviceIp(serial: string): Promise<string | null> {
     const r = await this.shell(serial, 'ip route')

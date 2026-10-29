@@ -521,3 +521,83 @@ export interface WaitImageResult {
   /** 匹配置信度 0..1（越高越像） */
   score?: number
 }
+
+/** 设备存储分区（device:sysinfo 返回的单项） */
+export interface SysStorage {
+  /** 挂载点，如 /data、/sdcard */
+  mount: string
+  total: string
+  used: string
+  avail: string
+  usePercent: string
+}
+
+/** 设备系统信息（device:sysinfo 返回） */
+export interface SystemInfo {
+  ok: boolean
+  message?: string
+  model: string
+  brand: string
+  device: string
+  android: string
+  sdk: string
+  build: string
+  serial: string
+  cpu: string
+  cores: number
+  memTotal: string
+  memAvail: string
+  uptime: string
+  resolution: string
+  density: string
+  battery: string
+  batteryStatus: string
+  batteryTemp: string
+  root: boolean
+  storage: SysStorage[]
+}
+
+/** 网络接口（device:netinfo 返回的单项） */
+export interface NetInterface {
+  name: string
+  ip: string
+}
+
+/** 设备网络信息（device:netinfo 返回） */
+export interface NetworkInfo {
+  ok: boolean
+  message?: string
+  interfaces: NetInterface[]
+  wifiSsid: string
+  wifiBssid: string
+  wifiRssi: string
+  gateway: string
+  dns: string[]
+  carrier: string
+}
+
+/** 已安装应用（device:apps:list 返回的单项） */
+export interface AppInfo {
+  pkg: string
+  label: string
+  versionName: string
+  versionCode: string
+}
+
+/** 应用列表结果（device:apps:list 返回） */
+export interface AppListResult {
+  ok: boolean
+  message?: string
+  apps: AppInfo[]
+}
+
+/** 应用操作（device:apps:action） */
+export type AppAction = 'launch' | 'stop' | 'uninstall' | 'clear' | 'info'
+
+/** 应用操作结果（device:apps:action 返回） */
+export interface AppActionResult {
+  ok: boolean
+  message?: string
+  /** info 操作返回的详情多行文本 */
+  detail?: string
+}

@@ -2300,6 +2300,7 @@ body.drawer-resizing {
 /* ===== 分段切换（终端 / 文件管理） ===== */
 .seg {
   display: inline-flex;
+  flex-wrap: wrap;
   gap: 2px;
   padding: 3px;
   margin-bottom: 16px;
@@ -2814,4 +2815,499 @@ body.drawer-resizing {
   gap: 12px;
   font-size: 13px;
   margin-top: 4px;
+}
+
+/* ===== 工具面板：系统信息 / 网络信息 / 应用管理 / 系统日志 ===== */
+
+/* 通用占位文本（终端/文件/各信息面板的空态与底部计数共用） */
+.hint {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+/* 工具面板抽屉改成「占满高度、各面板内部滚动」：seg 固定在顶部，内容区吃满剩余空间 */
+.drawer-body:has(.tools-layout) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.tools-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 信息面板（系统/网络）内容随抽屉滚动 */
+.tools-layout .infopanel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 终端：输入框固定，输出区吃满剩余高度并内部滚动 */
+.tools-layout .terminal {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+}
+
+/* 文件管理器：吃满高度，列表内部滚动 */
+.tools-layout .fm {
+  flex: 1;
+  min-height: 0;
+}
+
+.tools-layout .fm-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* 应用管理 / 系统日志：吃满高度，列表与日志区内部滚动 */
+.tools-layout .appmgr,
+.tools-layout .logcat {
+  flex: 1;
+  min-height: 0;
+}
+
+.tools-layout .appmgr-list,
+.tools-layout .logcat-view {
+  min-height: 0;
+}
+
+/* ---- 信息面板（系统 / 网络共用） ---- */
+.infopanel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.infopanel-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.infopanel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.infopanel-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.infopanel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.infopanel-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  min-width: 0;
+}
+
+.infopanel-k {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.infopanel-v {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.infopanel-v.ok {
+  color: var(--green);
+}
+
+.infopanel-v.dim {
+  color: var(--text-dim);
+}
+
+.infopanel-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--red) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 10%, transparent);
+  font-size: 12px;
+  color: var(--red);
+}
+
+.infopanel-error span {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
+.infopanel-table {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.infopanel-table-head,
+.infopanel-table-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr 0.7fr;
+  gap: 10px;
+  padding: 7px 11px;
+  align-items: center;
+}
+
+.infopanel-table-head {
+  background: var(--bg-hover);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.infopanel-table-row {
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+
+/* ---- 应用管理 ---- */
+.appmgr {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.appmgr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.appmgr-search {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.appmgr-search svg {
+  position: absolute;
+  left: 10px;
+  color: var(--text-faint);
+  pointer-events: none;
+}
+
+.appmgr-search .text-input {
+  padding-left: 30px;
+}
+
+.appmgr-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.appmgr-toggle input {
+  accent-color: var(--accent);
+}
+
+.appmgr-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+}
+
+.appmgr-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 11px;
+  border-top: 1px solid var(--border);
+}
+
+.appmgr-row:first-child {
+  border-top: 0;
+}
+
+.appmgr-row:hover {
+  background: var(--bg-hover);
+}
+
+.appmgr-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.appmgr-name {
+  font-size: 13px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appmgr-pkg {
+  font-size: 11px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appmgr-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.appmgr-actions .icon-btn {
+  width: 30px;
+  height: 30px;
+}
+
+.appmgr-danger:hover:not(:disabled) {
+  color: var(--red);
+}
+
+.appmgr-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, var(--red) 40%, var(--border));
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  font-size: 12px;
+}
+
+.appmgr-confirm span {
+  flex: 1;
+  min-width: 160px;
+}
+
+.appmgr-confirm b {
+  word-break: break-all;
+}
+
+.appmgr-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 40;
+}
+
+.appmgr-modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(460px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  z-index: 41;
+  overflow: hidden;
+}
+
+.appmgr-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.appmgr-modal-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appmgr-modal-pkg {
+  padding: 8px 14px 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.appmgr-modal-body {
+  margin: 8px 14px;
+  padding: 10px 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.appmgr-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 14px 12px;
+}
+
+/* ---- 系统日志（logcat） ---- */
+.logcat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.logcat-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.logcat-filter {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+}
+
+.logcat-presets {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.logcat-chip {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: var(--bg);
+}
+
+.logcat-chip:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.logcat-chip.active {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.logcat-autoscroll {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.logcat-autoscroll input {
+  accent-color: var(--accent);
+}
+
+.logcat-view {
+  flex: 1;
+  min-height: 240px;
+  background: #0a0c10;
+  color: #c9d1d9;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: text;
+}
+
+.logcat-view .hint {
+  color: #6b7484;
+}
+
+.logcat-line {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.logcat-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  margin-right: 5px;
+  vertical-align: middle;
+  animation: logcat-blink 1.2s ease-in-out infinite;
+}
+
+@keyframes logcat-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
 }

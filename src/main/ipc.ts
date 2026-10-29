@@ -34,7 +34,14 @@ import type {
   SessionStateEvent,
   SessionStats,
   AudioMeta,
-  AudioFrameEvent
+  AudioFrameEvent,
+  SystemInfo,
+  NetworkInfo,
+  AppInfo,
+  AppListResult,
+  AppActionResult,
+  AppAction,
+  SysStorage
 } from '@shared/types'
 
 export interface AppManager {
@@ -53,6 +60,178 @@ interface SessionHandle {
   opts: SessionOptions
 }
 
+// ---- 设备系统 / 网络信息解析（「终端与文件」工具面板用）----
+
+const EMPTY_SYSINFO: SystemInfo = {
+  ok: true,
+  model: '',
+  brand: '',
+  device: '',
+  android: '',
+  sdk: '',
+  build: '',
+  serial: '',
+  cpu: '',
+  cores: 0,
+  memTotal: '',
+  memAvail: '',
+  uptime: '',
+  resolution: '',
+  density: '',
+  battery: '',
+  batteryStatus: '',
+  batteryTemp: '',
+  root: false,
+  storage: []
+}
+
+/** dumpsys battery 的 status 数值 → 中文 */
+function batteryStatusText(s: string): string {
+  switch (s.trim()) {
+    case '2':
+      return '充电中'
+    case '3':
+      return '放电中'
+    case '4':
+      return '未充电'
+    case '5':
+      return '已充满'
+    default:
+      return s || '未知'
+  }
+}
+
+/** dumpsys battery 的 temperature（0.1°C）→ 可读字符串 */
+function batteryTempText(s: string): string {
+  const n = Number(s)
+  if (Number.isFinite(n) && n > 0) return `${(n / 10).toFixed(1)}°C`
+  return s || '未知'
+}
+
+/** 秒 → 可读时长 */
+function uptimeText(s: string): string {
+  const sec = Number(s)
+  if (!Number.isFinite(sec) || sec < 0) return '未知'
+  const d = Math.floor(sec / 86400)
+  const h = Math.floor((sec % 86400) / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  if (d > 0) return `${d} 天 ${h} 小时`
+  if (h > 0) return `${h} 小时 ${m} 分`
+  return `${m} 分`
+}
+
+/** kB → 可读大小 */
+function memText(s: string): string {
+  const kb = Number(s)
+  if (!Number.isFinite(kb) || kb <= 0) return '未知'
+  const mb = kb / 1024
+  if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`
+  return `${Math.round(mb)} MB`
+}
+
+/** 解析 df -h 的一行输出 → 分区信息 */
+function parseDfLine(line: string): SysStorage | null {
+  const parts = line.trim().split(/\s+/)
+  if (parts.length < 6) return null
+  return {
+    mount: parts[parts.length - 1],
+    usePercent: parts[parts.length - 2],
+    avail: parts[parts.length - 3],
+    used: parts[parts.length - 4],
+    total: parts[parts.length - 5]
+  }
+}
+
+/** 解析系统信息命令的原始输出 */
+function parseSystemInfo(raw: string): SystemInfo {
+  const kv: Record<string, string> = {}
+  const dfLines: string[] = []
+  let inDf = false
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim()
+    if (t.includes('QZRS_DF_BEGIN')) {
+      inDf = true
+      continue
+    }
+    if (t.includes('QZRS_DF_END')) {
+      inDf = false
+      continue
+    }
+    if (inDf) {
+      if (t) dfLines.push(t)
+      continue
+    }
+    const m = t.match(/^QZRS_(\w+)=(.*)$/)
+    if (m) kv[m[1]] = m[2].trim()
+  }
+  const storage = dfLines.map(parseDfLine).filter((x): x is SysStorage => x !== null)
+  return {
+    ...EMPTY_SYSINFO,
+    model: kv.MODEL ?? '',
+    brand: kv.BRAND ?? '',
+    device: kv.DEVICE ?? '',
+    android: kv.ANDROID ?? '',
+    sdk: kv.SDK ?? '',
+    build: kv.BUILD ?? '',
+    serial: kv.SERIAL ?? '',
+    cpu: kv.CPU ?? '',
+    cores: Number(kv.CORES) || 0,
+    memTotal: memText(kv.MEMTOTAL ?? ''),
+    memAvail: memText(kv.MEMAVAIL ?? ''),
+    uptime: uptimeText(kv.UPTIME ?? ''),
+    resolution: kv.RES ?? '',
+    density: kv.DENSITY ?? '',
+    battery: kv.BATT ? `${kv.BATT}%` : '',
+    batteryStatus: batteryStatusText(kv.BATTSTATUS ?? ''),
+    batteryTemp: batteryTempText(kv.BATTTEMP ?? ''),
+    root: kv.ROOT === 'yes',
+    storage
+  }
+}
+
+/** 解析网络信息命令的原始输出 */
+function parseNetworkInfo(raw: string): NetworkInfo {
+  const kv: Record<string, string> = {}
+  const ifLines: string[] = []
+  let inIf = false
+  for (const line of raw.split(/\r?\n/)) {
+    const t = line.trim()
+    if (t.includes('QZRS_IF_BEGIN')) {
+      inIf = true
+      continue
+    }
+    if (t.includes('QZRS_IF_END')) {
+      inIf = false
+      continue
+    }
+    if (inIf) {
+      if (t) ifLines.push(t)
+      continue
+    }
+    const m = t.match(/^QZRS_(\w+)=(.*)$/)
+    if (m) kv[m[1]] = m[2].trim()
+  }
+  const interfaces = ifLines
+    .map((l) => {
+      const parts = l.split(/\s+/)
+      const name = parts[0]?.replace(/:$/, '') ?? ''
+      const ip = (parts[1] ?? '').split('/')[0]
+      return name && ip ? { name, ip } : null
+    })
+    .filter((x): x is { name: string; ip: string } => x !== null)
+  const dns = [kv.DNS1, kv.DNS2].filter((d) => d && d !== '0.0.0.0' && d !== 'undefined')
+  return {
+    ok: true,
+    interfaces,
+    wifiSsid: kv.SSID ?? '',
+    wifiBssid: kv.BSSID ?? '',
+    wifiRssi: kv.RSSI ?? '',
+    gateway: kv.GW ?? '',
+    dns,
+    carrier: kv.CARRIER ?? ''
+  }
+}
+
 export function registerIpc(store: Store): AppManager {
   const sessions = new Map<string, SessionHandle>()
   // 会话当前视频尺寸（脚本引擎把像素坐标换算成协议参数用）：onStarted/onStreamMeta 更新，会话结束清理
@@ -61,6 +240,8 @@ export function registerIpc(store: Store): AppManager {
   // 外部 scrcpy.exe 子进程（serial -> ChildProcess），用于在 WebCodecs 渲染异常时
   // 临时回退到官方 scrcpy 自己的 SDL 窗口看画面（不嵌入，独立窗口）。
   const externalScrcpys = new Map<string, ChildProcess>()
+  /** 当前流式 logcat 子进程（serial -> ChildProcess）；重新 start 前先杀掉旧的 */
+  const logcatProcs = new Map<string, ChildProcess>()
   let adb: AdbClient | null = null
   let adbPath = ''
   let serverPath = ''
@@ -1108,6 +1289,197 @@ export function registerIpc(store: Store): AppManager {
     }
   })
 
+  // ---- 系统信息（一条组合命令 + 主进程解析成结构化对象）----
+  ipcMain.handle('device:sysinfo', async (_e, serial: string) => {
+    try {
+      const a = ensureAdb()
+      const cmd = [
+        'echo "QZRS_MODEL=$(getprop ro.product.model)"',
+        'echo "QZRS_BRAND=$(getprop ro.product.brand)"',
+        'echo "QZRS_DEVICE=$(getprop ro.product.device)"',
+        'echo "QZRS_ANDROID=$(getprop ro.build.version.release)"',
+        'echo "QZRS_SDK=$(getprop ro.build.version.sdk)"',
+        'echo "QZRS_BUILD=$(getprop ro.build.display.id)"',
+        'echo "QZRS_SERIAL=$(getprop ro.serialno)"',
+        'echo "QZRS_CPU=$(grep -m1 Hardware /proc/cpuinfo 2>/dev/null | cut -d: -f2 | xargs)"',
+        'echo "QZRS_CORES=$(grep -c ^processor /proc/cpuinfo 2>/dev/null)"',
+        'echo "QZRS_MEMTOTAL=$(grep MemTotal /proc/meminfo | tr -s " " | cut -d" " -f2)"',
+        'echo "QZRS_MEMAVAIL=$(grep MemAvailable /proc/meminfo | tr -s " " | cut -d" " -f2)"',
+        'echo "QZRS_UPTIME=$(cut -d" " -f1 /proc/uptime)"',
+        'echo "QZRS_RES=$(wm size 2>/dev/null | grep -i physical | head -1 | sed "s/.*: *//")"',
+        'echo "QZRS_DENSITY=$(wm density 2>/dev/null | grep -i physical | head -1 | sed "s/.*: *//")"',
+        'echo "QZRS_BATT=$(dumpsys battery 2>/dev/null | grep -m1 level | tr -d "\r" | sed "s/.*: *//")"',
+        'echo "QZRS_BATTSTATUS=$(dumpsys battery 2>/dev/null | grep -m1 status | tr -d "\r" | sed "s/.*: *//")"',
+        'echo "QZRS_BATTTEMP=$(dumpsys battery 2>/dev/null | grep -m1 temperature | tr -d "\r" | sed "s/.*: *//")"',
+        'echo "QZRS_ROOT=$(which su >/dev/null 2>&1 && echo yes || echo no)"',
+        'echo QZRS_DF_BEGIN',
+        'df -h /data /sdcard /system 2>/dev/null | tail -n +2',
+        'echo QZRS_DF_END'
+      ].join('\n')
+      const r = await a.shell(serial, cmd, 30000)
+      if (r.code !== 0 && !r.stdout) {
+        return { ok: false, message: (r.stderr || '获取系统信息失败').trim() }
+      }
+      return parseSystemInfo(r.stdout)
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ---- 网络信息 ----
+  ipcMain.handle('device:netinfo', async (_e, serial: string) => {
+    try {
+      const a = ensureAdb()
+      const cmd = [
+        'echo "QZRS_SSID=$(dumpsys wifi 2>/dev/null | grep -m1 "mWifiInfo" | sed "s/.*SSID: //; s/,.*//")"',
+        'echo "QZRS_BSSID=$(dumpsys wifi 2>/dev/null | grep -m1 "mWifiInfo" | sed "s/.*BSSID: //; s/,.*//")"',
+        'echo "QZRS_RSSI=$(dumpsys wifi 2>/dev/null | grep -m1 "mWifiInfo" | sed "s/.*RSSI: //; s/,.*//")"',
+        'echo "QZRS_GW=$(ip route 2>/dev/null | grep default | head -1 | tr -s " " | cut -d" " -f3)"',
+        'echo "QZRS_DNS1=$(getprop net.dns1)"',
+        'echo "QZRS_DNS2=$(getprop net.dns2)"',
+        'echo "QZRS_CARRIER=$(getprop gsm.operator.alpha)"',
+        'echo QZRS_IF_BEGIN',
+        'ip -o -4 addr show 2>/dev/null | tr -s " " | cut -d" " -f2,4',
+        'echo QZRS_IF_END'
+      ].join('\n')
+      const r = await a.shell(serial, cmd, 30000)
+      if (r.code !== 0 && !r.stdout) {
+        return { ok: false, message: (r.stderr || '获取网络信息失败').trim() }
+      }
+      return parseNetworkInfo(r.stdout)
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ---- 应用管理：列表（包名 + 应用名；第三方应用顺带解析 label）----
+  ipcMain.handle('device:apps:list', async (_e, serial: string, includeSystem: boolean) => {
+    try {
+      const a = ensureAdb()
+      // 第三方应用：用一次 shell 循环把每个包的 label 一起解析出来（循环跑在设备端，只有一次 adb 往返）。
+      // 系统应用数量多（300+），逐个 resolve 会拖十几秒，且用户基本只关心第三方 → 系统视图只给包名。
+      const listCmd = includeSystem
+        ? "pm list packages 2>/dev/null | sed 's/package://'"
+        : [
+            "pm list packages -3 2>/dev/null | sed 's/package://' | while read -r p; do",
+            "  printf '%s|' \"$p\"",
+            '  cmd package resolve-activity --brief -c android.intent.category.LAUNCHER "$p" 2>/dev/null | grep -m1 "^label=" | sed "s/^label=//"',
+            'done'
+          ].join('\n')
+      const r = await a.shell(serial, listCmd, 60000)
+      if (r.code !== 0 && !r.stdout) {
+        return { ok: false, message: (r.stderr || '获取应用列表失败').trim(), apps: [] }
+      }
+      const apps: AppInfo[] = r.stdout
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((line) => {
+          const i = line.indexOf('|')
+          const pkg = i >= 0 ? line.slice(0, i).trim() : line.trim()
+          const label = i >= 0 ? line.slice(i + 1).trim() : ''
+          return { pkg, label, versionName: '', versionCode: '' }
+        })
+        .filter((x) => x.pkg)
+      return { ok: true, apps }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err), apps: [] }
+    }
+  })
+
+  // ---- 应用管理：操作（启动/停止/卸载/清数据/详情）----
+  ipcMain.handle('device:apps:action', async (_e, serial: string, action: AppAction, pkg: string) => {
+    try {
+      const a = ensureAdb()
+      const p = String(pkg || '').trim()
+      if (!p) return { ok: false, message: '缺少包名' }
+      let cmd = ''
+      let timeout = 30000
+      switch (action) {
+        case 'launch':
+          cmd = `monkey -p ${p} -c android.intent.category.LAUNCHER 1`
+          break
+        case 'stop':
+          cmd = `am force-stop ${p}`
+          break
+        case 'uninstall':
+          cmd = `pm uninstall ${p}`
+          timeout = 60000
+          break
+        case 'clear':
+          cmd = `pm clear ${p}`
+          timeout = 60000
+          break
+        case 'info':
+          cmd = [
+            `echo "label=$(cmd package resolve-activity --brief -c android.intent.category.LAUNCHER ${p} 2>/dev/null | grep -m1 '^label=' | sed 's/^label=//')"`,
+            `dumpsys package ${p} | grep -E 'versionName=|versionCode=|userId=|firstInstallTime=|lastUpdateTime='`
+          ].join('\n')
+          break
+        default:
+          return { ok: false, message: '未知操作' }
+      }
+      const r = await a.shell(serial, cmd, timeout)
+      const out = (r.stdout || '').trim()
+      const err = (r.stderr || '').trim()
+      const detail = action === 'info' ? out : undefined
+      const ok = r.code === 0 && !/(Error|Failure|Exception)/i.test(err)
+      return { ok, message: ok ? (out || '成功') : (err || out || `执行失败（exit ${r.code}）`), detail }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  // ---- 系统日志（logcat 流式）----
+  ipcMain.handle('device:logcat:start', (_e, serial: string, filter: string) => {
+    try {
+      const a = ensureAdb()
+      // 过滤串白名单：只允许 tag:level 语法里的字符，避免命令注入
+      const f = /^[a-zA-Z0-9:* ._\-]+$/.test(String(filter || '')) ? String(filter).trim() : ''
+      const old = logcatProcs.get(serial)
+      if (old) {
+        try {
+          old.kill('SIGKILL')
+        } catch {
+          /* ignore */
+        }
+      }
+      const proc = a.streamShell(
+        serial,
+        f ? `logcat -v time ${f}` : 'logcat -v time',
+        (line) => send('logcat:line', { serial, line }),
+        () => logcatProcs.delete(serial)
+      )
+      logcatProcs.set(serial, proc)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
+  ipcMain.handle('device:logcat:stop', (_e, serial: string) => {
+    const proc = logcatProcs.get(serial)
+    if (proc) {
+      try {
+        proc.kill('SIGKILL')
+      } catch {
+        /* ignore */
+      }
+      logcatProcs.delete(serial)
+    }
+    return { ok: true }
+  })
+
+  ipcMain.handle('device:logcat:clear', async (_e, serial: string) => {
+    try {
+      const a = ensureAdb()
+      await a.shell(serial, 'logcat -c', 30000)
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, message: err instanceof Error ? err.message : String(err) }
+    }
+  })
+
   ipcMain.handle('device:push', async (_e, serial: string, localPath: string, remotePath: string) => {
     try {
       const a = ensureAdb()
@@ -1754,6 +2126,15 @@ export function registerIpc(store: Store): AppManager {
         }
       }
       externalScrcpys.clear()
+      // 关闭流式 logcat 子进程
+      for (const proc of logcatProcs.values()) {
+        try {
+          proc.kill('SIGKILL')
+        } catch {
+          /* ignore */
+        }
+      }
+      logcatProcs.clear()
       // 停止仍在录屏的设备，避免退出后 screenrecord 进程残留占满存储
       if (adb) {
         for (const [serial, remote] of records) {

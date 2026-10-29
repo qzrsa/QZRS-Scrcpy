@@ -2,7 +2,11 @@ import { useState } from 'react'
 import type { AdbShellResult } from '@shared/types'
 import { Drawer } from './Drawer'
 import { FileManager } from './FileManager'
-import { IconFolder, IconTerminal } from './icons'
+import { SystemInfoPanel } from './SystemInfoPanel'
+import { NetworkInfoPanel } from './NetworkInfoPanel'
+import { AppManagerPanel } from './AppManagerPanel'
+import { LogcatPanel } from './LogcatPanel'
+import { IconApps, IconCpu, IconFolder, IconGlobe, IconScroll, IconTerminal } from './icons'
 
 interface Props {
   serial: string | null
@@ -14,7 +18,7 @@ interface LogLine {
   text: string
 }
 
-type Tab = 'term' | 'files'
+type Tab = 'term' | 'files' | 'sys' | 'net' | 'apps' | 'log'
 
 export function ToolsPanel({ serial, onClose }: Props): JSX.Element {
   const [tab, setTab] = useState<Tab>('term')
@@ -36,26 +40,38 @@ export function ToolsPanel({ serial, onClose }: Props): JSX.Element {
 
   return (
     <Drawer
-      title="终端与文件"
+      title="终端与工具"
       wide
       resizableKey="tools"
-      defaultWidth={720}
+      defaultWidth={760}
       onClose={onClose}
     >
       {!serial ? (
-        <div className="hint">请先连接一台设备以使用终端与文件管理</div>
+        <div className="hint">请先连接一台设备以使用终端与工具</div>
       ) : (
-        <>
+        <div className="tools-layout">
           <div className="seg">
             <button className={tab === 'term' ? 'active' : undefined} onClick={() => setTab('term')}>
               <IconTerminal width={15} height={15} /> 终端
             </button>
             <button className={tab === 'files' ? 'active' : undefined} onClick={() => setTab('files')}>
-              <IconFolder width={15} height={15} /> 文件管理
+              <IconFolder width={15} height={15} /> 文件
+            </button>
+            <button className={tab === 'sys' ? 'active' : undefined} onClick={() => setTab('sys')}>
+              <IconCpu width={15} height={15} /> 系统
+            </button>
+            <button className={tab === 'net' ? 'active' : undefined} onClick={() => setTab('net')}>
+              <IconGlobe width={15} height={15} /> 网络
+            </button>
+            <button className={tab === 'apps' ? 'active' : undefined} onClick={() => setTab('apps')}>
+              <IconApps width={15} height={15} /> 应用
+            </button>
+            <button className={tab === 'log' ? 'active' : undefined} onClick={() => setTab('log')}>
+              <IconScroll width={15} height={15} /> 日志
             </button>
           </div>
 
-          {tab === 'term' ? (
+          {tab === 'term' && (
             <>
               <div className="field">
                 <label>ADB Shell</label>
@@ -82,10 +98,14 @@ export function ToolsPanel({ serial, onClose }: Props): JSX.Element {
                 ))}
               </div>
             </>
-          ) : (
-            <FileManager serial={serial} />
           )}
-        </>
+
+          {tab === 'files' && <FileManager serial={serial} />}
+          {tab === 'sys' && <SystemInfoPanel serial={serial} />}
+          {tab === 'net' && <NetworkInfoPanel serial={serial} />}
+          {tab === 'apps' && <AppManagerPanel serial={serial} />}
+          {tab === 'log' && <LogcatPanel serial={serial} />}
+        </div>
       )}
     </Drawer>
   )

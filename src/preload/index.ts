@@ -20,7 +20,12 @@ import type {
   LanScanResult,
   UpdateSnapshot,
   AudioMeta,
-  AudioFrameEvent
+  AudioFrameEvent,
+  SystemInfo,
+  NetworkInfo,
+  AppListResult,
+  AppActionResult,
+  AppAction
 } from '@shared/types'
 
 const api = {
@@ -53,6 +58,31 @@ const api = {
     ipcRenderer.invoke('device:shell', serial, command),
   pushFile: (serial: string, localPath: string, remotePath: string): Promise<OpResult> =>
     ipcRenderer.invoke('device:push', serial, localPath, remotePath),
+
+  /** ---- 系统信息 / 网络信息 / 应用管理 / 系统日志 ---- */
+  /** 拉取设备系统信息（型号/内存/电量/存储等，主进程解析成结构化对象） */
+  getSystemInfo: (serial: string): Promise<SystemInfo> => ipcRenderer.invoke('device:sysinfo', serial),
+  /** 拉取设备网络信息（IP/WiFi/网关/DNS/运营商等） */
+  getNetworkInfo: (serial: string): Promise<NetworkInfo> => ipcRenderer.invoke('device:netinfo', serial),
+  /** 列出设备已安装应用（includeSystem=true 含系统应用） */
+  listApps: (serial: string, includeSystem: boolean): Promise<AppListResult> =>
+    ipcRenderer.invoke('device:apps:list', serial, includeSystem),
+  /** 应用操作：启动 / 停止 / 卸载 / 清数据 / 详情 */
+  appAction: (serial: string, action: AppAction, pkg: string): Promise<AppActionResult> =>
+    ipcRenderer.invoke('device:apps:action', serial, action, pkg),
+  /** 开始拉取 logcat（流式，逐行经 onLogcatLine 推送） */
+  startLogcat: (serial: string, filter: string): Promise<OpResult> =>
+    ipcRenderer.invoke('device:logcat:start', serial, filter),
+  /** 停止 logcat */
+  stopLogcat: (serial: string): Promise<OpResult> => ipcRenderer.invoke('device:logcat:stop', serial),
+  /** 清空 logcat 缓冲区 */
+  clearLogcat: (serial: string): Promise<OpResult> => ipcRenderer.invoke('device:logcat:clear', serial),
+  onLogcatLine: (cb: (e: { serial: string; line: string }) => void): (() => void) => {
+    const l = (_e: unknown, d: { serial: string; line: string }): void => cb(d)
+    ipcRenderer.on('logcat:line', l)
+    return () => ipcRenderer.removeListener('logcat:line', l)
+  },
+
   /**
    * 把「拖进窗口的 File 对象」解析成本地绝对路径（拖拽上传用）。
    *

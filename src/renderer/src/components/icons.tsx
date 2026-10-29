@@ -269,3 +269,45 @@ export const IconCheck = (p: P): JSX.Element => (
     <path d="M20 6 9 17l-5-5" />
   </svg>
 )
+export const IconCpu = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <rect x="5" y="5" width="14" height="14" rx="2" />
+    <rect x="9" y="9" width="6" height="6" />
+    <path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3" />
+  </svg>
+)
+export const IconApps = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <rect x="3" y="3" width="8" height="8" rx="1.5" />
+    <rect x="13" y="3" width="8" height="8" rx="1.5" />
+    <rect x="3" y="13" width="8" height="8" rx="1.5" />
+    <rect x="13" y="13" width="8" height="8" rx="1.5" />
+  </svg>
+)
+export const IconScroll = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <path d="M8 21h12a2 2 0 0 0 2-2v-2H10v2a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v3h4" />
+    <path d="M19 17V5a2 2 0 0 0-2-2H4" />
+    <path d="M8 8h7M8 12h7" />
+  </svg>
+)
+export const IconSearch = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m21 21-4.3-4.3" />
+  </svg>
+)
+export const IconBattery = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <rect x="2" y="7" width="16" height="10" rx="2" />
+    <path d="M22 11v2" />
+    <path d="M6 10v4M10 10v4" />
+  </svg>
+)
+export const IconGlobe = (p: P): JSX.Element => (
+  <svg {...base(p)}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z" />
+  </svg>
+)
