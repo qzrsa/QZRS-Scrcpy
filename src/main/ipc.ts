@@ -15,6 +15,7 @@ import { PythonBridge, BridgeHttpError } from './bridge'
 import { writeBridgeClients } from './bridgeclients'
 import { UpdateService } from './update-service'
 import { detectForm } from './updater'
+import { parseManifestIcon, parseArscIconPaths, parseAdaptiveForeground, chooseIconPath, isBitmapPath } from './apkicon'
 import { OcrModelDownloader, type OcrProgress } from './ocrdownload'
 import { ocrStatus as ocrModelsStatus, OCR_MANUAL_URL, resolveOcrModelDir } from './ocrmodels'
 import { OcrEngine, type OcrResult } from './ocr'
@@ -155,6 +156,65 @@ function detectImageMime(buf: Buffer): string {
     return 'image/jpeg'
   }
   return 'image/png'
+}
+
+/** 严格判断是否为合法图片（png/webp/jpeg 魔数），用于图标提取校验（不兜底） */
+function isValidImage(buf: Buffer): boolean {
+  if (buf.length >= 8 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return true
+  if (buf.length >= 12 && buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP') return true
+  if (buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true
+  return false
+}
+
+/** 校验 APK 内路径，只允许 res/ 下的安全字符，防 shell 注入 */
+function safeApkEntry(p: string): string | null {
+  if (!/^[a-zA-Z0-9._/\\-]+$/.test(p) || p.includes('..') || p.includes('$') || p.includes('`')) return null
+  return p
+}
+
+/**
+ * 解析 manifest + arsc 拿真实资源路径（资源混淆的 App）。
+ * 图标可能是 adaptive icon XML，需再解析 foreground 指向的位图。
+ */
+async function extractByParse(a: AdbClient, serial: string, pkg: string, apkPath: string): Promise<AppIconResult> {
+  // 提取 manifest（binary XML）
+  const manifest = await a.execOut(serial, `unzip -p "${apkPath}" AndroidManifest.xml 2>/dev/null || true`, 15000)
+  if (!manifest || manifest.length < 8) return { ok: false, pkg, message: '无法提取 AndroidManifest.xml' }
+  const ref = parseManifestIcon(manifest)
+  if (!ref || ref.type !== 0x01) return { ok: false, pkg, message: 'manifest 无 icon 资源' }
+  const resId = ref.data
+
+  // 提取 resources.arsc（可能较大，给足超时）
+  const arsc = await a.execOut(serial, `unzip -p "${apkPath}" resources.arsc 2>/dev/null || true`, 30000)
+  if (!arsc || arsc.length < 12) return { ok: false, pkg, message: '无法提取 resources.arsc' }
+
+  // 资源 ID → 文件路径候选
+  let candidates = parseArscIconPaths(arsc, resId)
+  let iconPath = chooseIconPath(candidates)
+
+  // 若选中的是 XML（adaptive icon），解析 foreground 拿位图
+  if (iconPath && iconPath.endsWith('.xml')) {
+    const xml = await a.execOut(serial, `unzip -p "${apkPath}" "${iconPath}" 2>/dev/null || true`, 10000)
+    const fg = xml && xml.length >= 8 ? parseAdaptiveForeground(xml) : null
+    if (fg && fg.type === 0x01 && fg.data !== resId) {
+      const fgCandidates = parseArscIconPaths(arsc, fg.data)
+      const fgPath = chooseIconPath(fgCandidates)
+      if (fgPath && isBitmapPath(fgPath)) iconPath = fgPath
+    }
+  }
+
+  if (!iconPath || !isBitmapPath(iconPath)) {
+    return { ok: false, pkg, message: `图标资源不是位图（${iconPath ?? '无'})` }
+  }
+  const entry = safeApkEntry(iconPath)
+  if (!entry) return { ok: false, pkg, message: '非法图标路径' }
+
+  // 提取位图
+  const buf = await a.execOut(serial, `unzip -p "${apkPath}" "${entry}" 2>/dev/null || true`, 15000)
+  if (!buf || buf.length < 8) return { ok: false, pkg, message: `图标提取失败（${entry}）` }
+  if (!isValidImage(buf)) return { ok: false, pkg, message: `图标不是合法图片（${entry}）` }
+  const mime = detectImageMime(buf)
+  return { ok: true, pkg, mime, data: buf.toString('base64') }
 }
 
 /** 解析系统信息命令的原始输出 */
@@ -1377,8 +1437,8 @@ export function registerIpc(store: Store): AppManager {
         ? "pm list packages 2>/dev/null | sed 's/package://'"
         : [
             "pm list packages -3 2>/dev/null | sed 's/package://' | while read -r p; do",
-            "  printf '%s|' \"$p\"",
-            '  cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$p" 2>/dev/null | grep -m1 "^label=" | sed "s/^label=//"',
+            '  lbl=$(cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$p" 2>/dev/null | grep -m1 "^label=" | sed "s/^label=//")',
+            "  printf '%s|%s\\n' \"$p\" \"$lbl\"",
             'done'
           ].join('\n')
       const r = await a.shell(serial, listCmd, 60000)
@@ -1452,16 +1512,18 @@ export function registerIpc(store: Store): AppManager {
       const p = String(pkg || '').trim()
       // 包名白名单（来自 pm list packages，只允许字母数字._），防命令注入
       if (!/^[a-zA-Z0-9._]+$/.test(p)) return { ok: false, pkg: p, message: '非法包名' }
-      const script = [
-        `apk=$(pm path "${p}" 2>/dev/null | head -1 | sed 's/^package://')`,
-        // 在 APK（zip）里找 launcher 图标：ic_launcher*.png/webp，排除 adaptive 的 foreground 与 round
-        `icon=$(unzip -l "$apk" 2>/dev/null | awk '$NF ~ /ic_launcher[^/]*\\.(png|webp)$/ && $NF !~ /foreground|round/ {print $NF; exit}')`,
-        `if [ -n "$icon" ]; then unzip -p "$apk" "$icon" 2>/dev/null; fi`
-      ].join('\n')
-      const buf = await a.execOut(serial, script, 20000)
-      if (!buf || buf.length < 8) return { ok: false, pkg: p, message: '未找到图标' }
-      const mime = detectImageMime(buf)
-      return { ok: true, pkg: p, mime, data: buf.toString('base64') }
+
+      // 1. 定位 APK 路径（split APK 取 base）
+      const apkOut = await a.execOut(
+        serial,
+        `pm path "${p}" 2>/dev/null | head -1 | sed 's/^package://'`,
+        10000
+      )
+      const apkPath = apkOut.toString('utf8').trim().split(/\r?\n/)[0].trim()
+      if (!apkPath.endsWith('.apk')) return { ok: false, pkg: p, message: '未找到 APK 路径' }
+
+      // 2. 解析 manifest + arsc 拿真实资源路径（统一路径，资源混淆与否都正确）
+      return await extractByParse(a, serial, p, apkPath)
     } catch (err) {
       return { ok: false, pkg: String(pkg || ''), message: err instanceof Error ? err.message : String(err) }
     }

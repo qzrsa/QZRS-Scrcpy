@@ -248,8 +248,9 @@ const ACTION_TEXT: Record<Action, string> = {
 }
 
 /**
- * 应用图标（懒加载）：进入视口才从设备拉取图标（unzip APK 里的 ic_launcher），
- * 结果进模块级缓存，滚动回来不重复请求；加载前/失败时显示应用名首字母占位。
+ * 应用图标（懒加载）：进入视口才从设备拉取图标（主进程解析 APK 的 manifest + arsc
+ * 定位真实图标资源，兼容资源混淆的 App），结果进模块级缓存，滚动回来不重复请求；
+ * 加载前/失败时显示应用名首字母占位。
  */
 function AppIcon({ serial, pkg, name }: { serial: string; pkg: string; name: string }): JSX.Element {
   const key = `${serial}|${pkg}`
