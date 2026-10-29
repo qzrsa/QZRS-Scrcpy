@@ -125,9 +125,13 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
       return ''
     }
   })
-  /** 秒 → ms（1 秒 ~ 24 小时；空/非法回落到 30 秒） */
+  /** 秒 → ms；填 0 = 连续循环（跑完立即重跑，传 -1）；空/非法回落到 30 秒；>0 = 间隔循环 */
   const loopMs = loopOn
-    ? Math.max(1, Math.min(86400, Math.round(Number(loopSecText) || 30))) * 1000
+    ? (() => {
+        const t = loopSecText.trim()
+        if (t === '0') return -1
+        return Math.max(1, Math.min(86400, Math.round(Number(t) || 30))) * 1000
+      })()
     : 0
   /** 循环限次（正整数；空/非法 = 0 = 不限） */
   const maxRounds = loopOn ? Math.max(0, Math.trunc(Number(loopCountText) || 0)) : 0
@@ -396,6 +400,11 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
     if (!target) return
     const r = await window.api.runScript(target, sessionId, loopMs, maxRounds)
     if (!r.ok) onToast(r.message || '运行失败', 'error')
+    else if (loopMs < 0)
+      onToast(
+        maxRounds > 0 ? `连续循环：跑完立即重跑，跑满 ${maxRounds} 轮自动停` : '连续循环：跑完立即重跑，点停止结束',
+        'info'
+      )
     else if (loopMs > 0)
       onToast(
         maxRounds > 0
@@ -696,9 +705,11 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
                 onClick={() => void run()}
                 disabled={!code.trim() || !sessionId}
                 title={
-                  loopMs > 0
-                    ? `运行（循环：每 ${loopMs / 1000} 秒一遍${maxRounds > 0 ? `，跑满 ${maxRounds} 轮` : ''}）Ctrl+Enter`
-                    : '运行（Ctrl+Enter）'
+                  loopMs < 0
+                    ? `运行（连续循环：跑完立即重跑${maxRounds > 0 ? `，跑满 ${maxRounds} 轮` : ''}）Ctrl+Enter`
+                    : loopMs > 0
+                      ? `运行（循环：每 ${loopMs / 1000} 秒一遍${maxRounds > 0 ? `，跑满 ${maxRounds} 轮` : ''}）Ctrl+Enter`
+                      : '运行（Ctrl+Enter）'
                 }
               >
                 运行
@@ -707,7 +718,7 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
             {/* 循环：录制完直接勾上就能"每隔 N 秒重播"，不用写 while/await */}
             <label
               className={`loop-box ${loopOn ? 'on' : ''}`}
-              title="整段脚本跑完后等 N 秒，再从头跑一遍；点「停止」结束（录制宏用）"
+              title="整段脚本跑完后等 N 秒再从头跑；间隔填 0 = 连续循环（跑完立即重跑）；点「停止」结束"
             >
               <input
                 type="checkbox"
@@ -726,11 +737,11 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
               <input
                 className="loop-sec"
                 type="number"
-                min={1}
+                min={0}
                 max={86400}
                 value={loopSecText}
                 disabled={!loopOn}
-                aria-label="循环间隔（秒）"
+                aria-label="循环间隔（秒，0 = 连续）"
                 onChange={(e) => {
                   setLoopSecText(e.target.value)
                   try {

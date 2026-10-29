@@ -125,7 +125,7 @@ interface RunState {
   name: string
   sessionId: string
   stopped: boolean
-  /** >0 = 整段脚本循环跑，每轮结束后等这么多毫秒（录制宏的"每隔 N 秒执行一次"） */
+  /** >0 = 整段脚本循环跑，每轮结束后等这么多毫秒（录制宏的"每隔 N 秒执行一次"）；<0 = 连续循环（跑完立即重跑） */
   loopMs: number
   /** >0 = 循环跑满 N 轮后自动结束（0 = 不限，跑到点「停止」为止） */
   maxRounds: number
@@ -261,12 +261,19 @@ export class ScriptEngine {
     if (!this.hooks.isSessionAlive(sessionId)) throw new Error('会话不存在或已断开，请先连接设备')
 
     // 下限 200ms：再短就不是"循环"而是死循环刷指令了（会把设备点乱）。
+    // <0 = 连续循环（跑完立即重跑），统一归成 -1；>0 夹到 [200, 86400000]；=0 不循环。
     const rawLoop = Number(opts?.loopMs ?? 0)
-    const loopMs = Number.isFinite(rawLoop) && rawLoop > 0 ? Math.max(200, Math.min(86_400_000, Math.floor(rawLoop))) : 0
-    // 循环限次：只在 loopMs>0 时有意义；夹到 [1, 100000]，0 = 不限
+    const loopMs = Number.isFinite(rawLoop)
+      ? rawLoop < 0
+        ? -1
+        : rawLoop > 0
+          ? Math.max(200, Math.min(86_400_000, Math.floor(rawLoop)))
+          : 0
+      : 0
+    // 循环限次：只要在循环（loopMs !== 0）就有意义；夹到 [1, 100000]，0 = 不限
     const rawMax = Number(opts?.maxRounds ?? 0)
     const maxRounds =
-      loopMs > 0 && Number.isFinite(rawMax) && rawMax > 0 ? Math.max(1, Math.min(100_000, Math.floor(rawMax))) : 0
+      loopMs !== 0 && Number.isFinite(rawMax) && rawMax > 0 ? Math.max(1, Math.min(100_000, Math.floor(rawMax))) : 0
 
     this.seq += 1
     const runId = `r${Date.now().toString(36)}${this.seq.toString(36)}`
@@ -347,7 +354,7 @@ export class ScriptEngine {
 
   /** 包装层在用户代码前插入的行数（循环模式多一行 while） */
   private static wrapperLines(st: RunState): number {
-    return st.loopMs > 0 ? 2 : 1
+    return st.loopMs !== 0 ? 2 : 1
   }
 
   /**
@@ -363,8 +370,9 @@ export class ScriptEngine {
       // 循环模式：整段用户代码当作循环体，每轮之间由 __qzrsLoopTick 等固定间隔。
       // 用 while(true) 而不是 for，是因为循环次数通常由用户点「停止」决定；
       // 设置了 maxRounds 时 __qzrsLoopTick 返回 true 触发 break，跑满 N 轮自动收尾。
+      // 连续循环（loopMs<0）给 tick 传 0 = 跑完立即重跑，不空等。
       const body =
-        st.loopMs > 0 ? `while (true) {\n${code}\nif (await __qzrsLoopTick(${st.loopMs})) break\n}` : code
+        st.loopMs !== 0 ? `while (true) {\n${code}\nif (await __qzrsLoopTick(${st.loopMs < 0 ? 0 : st.loopMs})) break\n}` : code
       // 包一层 async IIFE：用户代码可以直接顶层 await（vm.Script 本身不支持 TLA）
       const wrapped = new vm.Script(`(async () => {\n${body}\n})()`, { filename: `${st.name}.js` })
       await wrapped.runInContext(context, { timeout: 5000 })
@@ -837,27 +845,30 @@ export class ScriptEngine {
           return true
         }
         const wait = Math.max(0, Number(ms) || 0)
-        const nextAt = Date.now() + wait
-        this.emit(st, {
-          state: 'log',
-          line: `↻ 第 ${round} 轮完成，${durText(wait)}后重来（约 ${clockOf(nextAt)}）`
-        })
         checkStop()
-
-        let beatAt = Date.now() + ScriptEngine.LOOP_BEAT_MS
-        for (;;) {
-          const left = nextAt - Date.now()
-          if (left <= 0) break
-          await sleep(Math.min(ScriptEngine.LOOP_SLICE_MS, left))
-          checkStop()
-          if (Date.now() >= beatAt) {
-            this.emit(st, {
-              state: 'log',
-              line: `⏳ 距第 ${round + 1} 轮还有 ${durText(nextAt - Date.now())}（${clockOf(nextAt)}）`
-            })
-            beatAt = Date.now() + ScriptEngine.LOOP_BEAT_MS
+        if (wait > 0) {
+          // 间隔循环：等固定时长再下一轮，期间每 30s 醒一次查 stop、每 5 分钟打一行倒计时。
+          const nextAt = Date.now() + wait
+          this.emit(st, {
+            state: 'log',
+            line: `↻ 第 ${round} 轮完成，${durText(wait)}后重来（约 ${clockOf(nextAt)}）`
+          })
+          let beatAt = Date.now() + ScriptEngine.LOOP_BEAT_MS
+          for (;;) {
+            const left = nextAt - Date.now()
+            if (left <= 0) break
+            await sleep(Math.min(ScriptEngine.LOOP_SLICE_MS, left))
+            checkStop()
+            if (Date.now() >= beatAt) {
+              this.emit(st, {
+                state: 'log',
+                line: `⏳ 距第 ${round + 1} 轮还有 ${durText(nextAt - Date.now())}（${clockOf(nextAt)}）`
+              })
+              beatAt = Date.now() + ScriptEngine.LOOP_BEAT_MS
+            }
           }
         }
+        // 连续循环（wait=0）：跳过"空等"，直接进下一轮。
         this.emit(st, { state: 'log', line: `▶ 第 ${round + 1} 轮开始（${clockOf(Date.now())}）` })
         return false
       },

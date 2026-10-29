@@ -1280,7 +1280,7 @@ export function registerIpc(store: Store): AppManager {
       const sid = String(sessionId)
       const loop = Number(loopMs) || 0
       const rounds = Number(maxRounds) || 0
-      // loopMs > 0 = 录制宏的「每 N 秒重播一遍」，由引擎包成 while 循环；maxRounds 跑满即停
+      // loopMs > 0 = 录制宏的「每 N 秒重播一遍」；loopMs < 0 = 连续循环（跑完立即重跑）；都由引擎包成 while 循环
       const { runId } = scriptEngine.run(script, sid, { loopMs: loop, maxRounds: rounds })
       // 登记运行参数：断线自动重连（方案 B）时据此判断要不要重建会话、重跑时还原参数
       const h = sessions.get(sid)
