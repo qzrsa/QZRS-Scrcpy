@@ -417,6 +417,7 @@ export default function App(): JSX.Element {
             decoderAcceleration={settings.decoderAcceleration}
             onStats={handleRenderStats}
             autoFit={settings.mirrorAutoFit !== false}
+            videoBuffer={settings.session.videoBuffer ?? 0}
             keymap={activeKeymap}
             editing={keymapEditing}
             // 按键调试日志：设置项（原先工具栏的「D」按钮），保存后生效

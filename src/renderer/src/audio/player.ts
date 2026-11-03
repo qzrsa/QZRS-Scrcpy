@@ -11,10 +11,10 @@ const CODEC_STRING: Record<string, string> = {
   flac: 'flac'
 }
 
-/** 起播缓冲：攒够这么多音频再开始播，避免开头就断断续续。 */
-const TARGET_LATENCY = 0.08
-/** 排程不允许落到"现在"之前；落后到这个裕度就前移时间轴。 */
-const MIN_AHEAD = 0.02
+/** 起播缓冲（秒）：攒够这么多音频再开始播，避免开头就断断续续。可由设置 audioBuffer 覆盖。 */
+const DEFAULT_TARGET_LATENCY = 0.08
+/** 排程下限裕度（秒）：不允许落到"现在"之前。可由设置 audioOutputBuffer 覆盖。 */
+const DEFAULT_MIN_AHEAD = 0.02
 /** 时间轴领先超过这个量说明积压了（卡顿后狂追），直接重置回收延迟。 */
 const MAX_AHEAD = 0.35
 /** 解码队列积压上限：超过就丢包追实时（音频宁可丢一点也不能越播越延迟）。 */
@@ -37,6 +37,11 @@ export class AudioPlayer {
   private disposed = false
   private warned = false
 
+  /** 起播缓冲（秒），默认 80ms，可由设置「音频缓冲」覆盖。 */
+  private targetLatency = DEFAULT_TARGET_LATENCY
+  /** 排程下限裕度（秒），默认 20ms，可由设置「音频输出缓冲」覆盖。 */
+  private minAhead = DEFAULT_MIN_AHEAD
+
   onError?: (message: string) => void
 
   constructor(sessionId: string) {
@@ -51,6 +56,17 @@ export class AudioPlayer {
     this.channels = channels || 2
     // 编码换了要重建解码器（description 也会随之更新）。
     this.resetDecoder()
+  }
+
+  /**
+   * 设置播放器缓冲参数（在收到流头前/后都可调用，幂等）：
+   *  - `bufferMs`       → 起播缓冲（scrcpy `--audio-buffer` 语义，越大越抗抖但延迟越高）
+   *  - `outputBufferMs` → 排程下限裕度（scrcpy `--audio-output-buffer` 语义，越小延迟越低但越易爆音）
+   * 传 0 / 负数表示用内置默认值（80ms / 20ms）。
+   */
+  configureBuffering(bufferMs: number, outputBufferMs: number): void {
+    if (bufferMs > 0) this.targetLatency = Math.min(1, Math.max(0.01, bufferMs / 1000))
+    if (outputBufferMs > 0) this.minAhead = Math.min(0.2, Math.max(0.005, outputBufferMs / 1000))
   }
 
   /**
@@ -182,11 +198,11 @@ export class AudioPlayer {
     data.close()
 
     const now = ctx.currentTime
-    if (this.nextTime === 0) this.nextTime = now + TARGET_LATENCY
+    if (this.nextTime === 0) this.nextTime = now + this.targetLatency
     // 落后：时间轴已被现实抛下，前移到最小裕度（不追求补齐，只求不爆音）。
-    if (this.nextTime < now + MIN_AHEAD) this.nextTime = now + MIN_AHEAD
+    if (this.nextTime < now + this.minAhead) this.nextTime = now + this.minAhead
     // 领先过多：说明中间卡顿过，重新攒缓冲，避免延迟越积越大。
-    else if (this.nextTime > now + MAX_AHEAD) this.nextTime = now + TARGET_LATENCY
+    else if (this.nextTime > now + MAX_AHEAD) this.nextTime = now + this.targetLatency
 
     const when = this.nextTime
     this.nextTime += frames / rate

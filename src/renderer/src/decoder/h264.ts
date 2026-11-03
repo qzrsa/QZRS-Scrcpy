@@ -287,15 +287,22 @@ export class H264Player {
   private hardware = false
   private statsTimer: number | null = null
 
+  /** 视频显示缓冲 ms：>0 时把解码帧延迟该毫秒再上屏，用于平滑网络抖动（scrcpy `--video-buffer` 语义）。 */
+  private videoBufferMs = 0
+  /** 待延迟绘制的帧队列（VideoFrame 持有引用以免被 GC 自动 close）。 */
+  private delayQueue: { frame: VideoFrame; at: number }[] = []
+  private delayTimer: number | null = null
+
   onSink?: RenderSink
   onStats?: (s: { renderFps: number; hardware: boolean }) => void
 
-  constructor(canvas: HTMLCanvasElement, opts?: { acceleration?: DecoderAcceleration }) {
+  constructor(canvas: HTMLCanvasElement, opts?: { acceleration?: DecoderAcceleration; videoBufferMs?: number }) {
     this.canvas = canvas
     // alpha:false：视频画布不需要透明通道，跳过合成可省一次混合；
     // desynchronized:true：提示浏览器走低延迟呈现路径（允许跳过 vsync 队列）。
     this.ctx = canvas.getContext('2d', { alpha: false, desynchronized: true })
     this.acceleration = opts?.acceleration ?? 'auto'
+    this.videoBufferMs = opts?.videoBufferMs && opts.videoBufferMs > 0 ? Math.round(opts.videoBufferMs) : 0
   }
 
   feed(data: Uint8Array, isConfig: boolean, isKey: boolean): void {
@@ -499,13 +506,32 @@ export class H264Player {
       frame.close()
       return
     }
-    if (this.canvas.width !== frame.displayWidth || this.canvas.height !== frame.displayHeight) {
-      this.canvas.width = frame.displayWidth
-      this.canvas.height = frame.displayHeight
-      // 同步 CSS 渲染比例：max-width/max-height 缩放时保持 frame 物理宽高比
-      // （否则竖屏设备在横向窗口里会被 max-height 裁掉底部，max-width 拉出左右黑边）
-      this.canvas.style.aspectRatio = `${frame.displayWidth} / ${frame.displayHeight}`
-      this.onVideoSize?.(frame.displayWidth, frame.displayHeight)
+    // 尺寸变化立即生效（旋转 / 切会话换分辨率时画布尺寸要先对），绘制本身才按缓冲延迟。
+    this.applyFrameSize(frame.displayWidth, frame.displayHeight)
+    if (this.videoBufferMs > 0) {
+      this.delayQueue.push({ frame, at: performance.now() + this.videoBufferMs })
+      this.scheduleDelayFlush()
+      return
+    }
+    this.drawFrame(frame)
+  }
+
+  /** 画布物理尺寸跟着帧分辨率走（不变则不重设，避免闪屏）。 */
+  private applyFrameSize(width: number, height: number): void {
+    if (this.canvas.width === width && this.canvas.height === height) return
+    this.canvas.width = width
+    this.canvas.height = height
+    // 同步 CSS 渲染比例：max-width/max-height 缩放时保持 frame 物理宽高比
+    // （否则竖屏设备在横向窗口里会被 max-height 裁掉底部，max-width 拉出左右黑边）
+    this.canvas.style.aspectRatio = `${width} / ${height}`
+    this.onVideoSize?.(width, height)
+  }
+
+  /** 真正把一帧画上画布并释放。 */
+  private drawFrame(frame: VideoFrame): void {
+    if (this.disposed) {
+      frame.close()
+      return
     }
     // 先清屏再绘制：避免上一帧或 GPU 未初始化 buffer 残留（硬件 H.264 解码出 corrupt
     // frame 时，残留区会显示 GPU 默认色 = 绿色，导致"大面积纯绿 + 顶部少量内容"）。
@@ -513,6 +539,44 @@ export class H264Player {
     this.ctx?.drawImage(frame, 0, 0)
     this.renderFrames++
     frame.close()
+  }
+
+  /** 预约一次到点冲刷：只挂一个定时器，按队首帧的显示时刻精确唤醒，避免每帧都开新 timer。 */
+  private scheduleDelayFlush(): void {
+    if (this.delayTimer !== null) return
+    const next = this.delayQueue[0]
+    if (!next) return
+    const wait = Math.max(0, next.at - performance.now())
+    this.delayTimer = window.setTimeout(() => {
+      this.delayTimer = null
+      this.flushDelayQueue()
+      if (this.delayQueue.length > 0) this.scheduleDelayFlush()
+    }, wait + 1)
+  }
+
+  /** 把已到显示时刻的帧按序画出来；没到点的留在队列里。 */
+  private flushDelayQueue(): void {
+    const now = performance.now()
+    while (this.delayQueue.length > 0 && this.delayQueue[0].at <= now) {
+      const { frame } = this.delayQueue.shift()!
+      this.drawFrame(frame)
+    }
+  }
+
+  /** 丢弃队列里尚未绘制的帧（dispose / 重建解码器时调用，防泄漏）。 */
+  private clearDelayQueue(): void {
+    if (this.delayTimer !== null) {
+      clearTimeout(this.delayTimer)
+      this.delayTimer = null
+    }
+    for (const { frame } of this.delayQueue) {
+      try {
+        frame.close()
+      } catch {
+        /* already closed */
+      }
+    }
+    this.delayQueue = []
   }
 
   /** 关闭旧解码器并清空待解码缓冲，用于设备旋转导致分辨率/SPS 变化时重建解码器。 */
@@ -529,6 +593,7 @@ export class H264Player {
     // 旧分辨率下缓冲的帧已无意义（尺寸不匹配），丢弃；后续新关键帧会在 configure
     // 完成后经 pendingFrames 重新缓冲。
     this.pendingFrames = []
+    this.clearDelayQueue()
   }
 
   dispose(): void {
@@ -546,5 +611,6 @@ export class H264Player {
     }
     this.decoder = null
     this.configured = false
+    this.clearDelayQueue()
   }
 }

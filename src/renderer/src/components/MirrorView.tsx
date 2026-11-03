@@ -50,6 +50,11 @@ interface Props {
    * 约 2.6 倍，实测正圆变椭圆）。关闭时回到原来的静态布局。
    */
   autoFit?: boolean
+  /**
+   * 视频显示缓冲 ms（设置项 `session.videoBuffer`，默认 0 = 不缓冲）。
+   * 建会话时定死，改设置需重新连接才生效（与 decoderAcceleration 同一套语义）。
+   */
+  videoBuffer?: number
 }
 
 /**
@@ -74,7 +79,8 @@ export function MirrorView({
   recording,
   onRecordGesture,
   onRecordKey,
-  autoFit = true
+  autoFit = true,
+  videoBuffer = 0
 }: Props): JSX.Element {
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -235,7 +241,7 @@ export function MirrorView({
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    const player = new H264Player(canvas, { acceleration: decoderAcceleration })
+    const player = new H264Player(canvas, { acceleration: decoderAcceleration, videoBufferMs: videoBuffer })
     player.onError = (m) => onError(m)
     player.onStats = onStats
     // 首帧 / 设备旋转 / 切会话换分辨率都会走到这里，拿到真实尺寸后立刻重算显示尺寸。

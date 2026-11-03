@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useRef, useCallback, type ReactNode } from 'react'
 import type { DeviceInfo, AppSettings, KeymapConfig, SessionOptions } from '@shared/types'
 import { playerFor, disposePlayer, disposeAllPlayers } from './audio/player'
 
@@ -35,6 +35,11 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
   const [sessions, setSessions] = useState<SessionInfo[]>([])
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [keymaps, setKeymaps] = useState<KeymapConfig[]>([])
+  // 音频播放器缓冲参数要从 onAudioMeta（挂载时注册、闭包为旧 settings）里读最新值，用 ref 中转。
+  const settingsRef = useRef<AppSettings | null>(null)
+  useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
 
   useEffect(() => {
     void window.api.getSettings().then(setSettings)
@@ -76,7 +81,10 @@ export function AppProvider({ children }: { children: ReactNode }): JSX.Element 
     // ---- 音频 ----
     // 播放器按会话独立：群控时多台设备各自出声，互不干扰。
     const offAudioMeta = window.api.onAudioMeta((m) => {
-      playerFor(m.sessionId).configure(m.codec, m.sampleRate, m.channels)
+      const p = playerFor(m.sessionId)
+      const s = settingsRef.current?.session
+      p.configureBuffering(s?.audioBuffer ?? 0, s?.audioOutputBuffer ?? 0)
+      p.configure(m.codec, m.sampleRate, m.channels)
     })
     const offAudioFrame = window.api.onAudioFrame((e) => {
       playerFor(e.sessionId).feed(e.data, e.isConfig, e.pts)
@@ -187,6 +195,9 @@ function defaultSession(): SessionOptions {
     maxSize: 1920,
     codec: 'h264',
     videoEncoder: '',
+    crop: '',
+    angle: 0,
+    videoBuffer: 0,
     control: true,
     stayAwake: true,
     showTouches: false,
@@ -197,7 +208,11 @@ function defaultSession(): SessionOptions {
     audio: true,
     audioSource: 'output',
     audioCodec: 'opus',
-    audioBitRate: 0
+    audioBitRate: 0,
+    audioEncoder: '',
+    audioDup: false,
+    audioBuffer: 80,
+    audioOutputBuffer: 20
   }
 }
 

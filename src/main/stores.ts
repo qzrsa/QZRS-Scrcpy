@@ -49,6 +49,10 @@ const DEFAULT_SETTINGS: AppSettings = {
     maxSize: 1920,
     codec: 'h264',
     videoEncoder: '',
+    // 裁剪/旋转/视频缓冲：默认都不开（crop 空串=不裁，angle 0=不转，videoBuffer 0=不缓冲）。
+    crop: '',
+    angle: 0,
+    videoBuffer: 0,
     control: true,
     stayAwake: true,
     showTouches: false,
@@ -62,7 +66,13 @@ const DEFAULT_SETTINGS: AppSettings = {
     audio: true,
     audioSource: 'output',
     audioCodec: 'opus',
-    audioBitRate: 0
+    audioBitRate: 0,
+    audioEncoder: '',
+    audioDup: false,
+    // 音频缓冲默认与播放器实测调优值一致（起播缓冲 80ms / 排程下限 20ms），
+    // 新字段对老机器也生效（getSettings 对 session 做浅合并补齐）。
+    audioBuffer: 80,
+    audioOutputBuffer: 20
   }
 }
 

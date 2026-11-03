@@ -40,6 +40,12 @@ export interface DeviceHistoryEntry {
 export type VideoCodec = 'h264' | 'h265' | 'av1'
 
 /**
+ * 画面旋转角度（scrcpy `angle`，服务端用 OpenGL 仿射变换旋转后再编码，
+ * 90/270 时编码分辨率也会随之宽高对调）。0 = 不旋转。
+ */
+export type VideoAngle = 0 | 90 | 180 | 270
+
+/**
  * 设备端音频来源（scrcpy `audio_source`）。
  * - `output`  ：转发整个音频输出，**同时关闭设备端外放**（Android 11+ 才有此源）
  * - `mic`     ：采集麦克风，不影响外放
@@ -63,6 +69,12 @@ export interface SessionOptions {
   codec: VideoCodec
   /** explicit device-side MediaCodec encoder name; empty = auto select */
   videoEncoder: string
+  /** 裁剪区域 `W:H:X:Y`（服务端裁剪后再编码）；空串 = 不裁剪 */
+  crop: string
+  /** 画面旋转角度（0/90/180/270，顺时针；服务端旋转，客户端无需重映射坐标） */
+  angle: VideoAngle
+  /** 视频显示缓冲 ms（客户端延迟显示以平滑抖动）；0 = 不缓冲 */
+  videoBuffer: number
   /** enable control */
   control: boolean
   /** keep device screen awake */
@@ -84,6 +96,14 @@ export interface SessionOptions {
   audioCodec: AudioCodec
   /** 音频码率 bits/s，0 = 服务端默认（128 kbps） */
   audioBitRate: number
+  /** 显式指定设备端音频编码器名；空 = 自动选择 */
+  audioEncoder: string
+  /** 边播边录：设备外放与转发同时进行（scrcpy `audio_dup`） */
+  audioDup: boolean
+  /** 音频起播/输入缓冲 ms（客户端平滑抖动，映射到播放器起播缓冲） */
+  audioBuffer: number
+  /** 音频输出缓冲裕度 ms（客户端 WebAudio 排程下限，越小延迟越低越易爆音） */
+  audioOutputBuffer: number
 }
 
 export interface StreamMeta {

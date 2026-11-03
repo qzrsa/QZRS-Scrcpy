@@ -63,6 +63,16 @@ export function SettingsPanel({
   const extra = useMemo(() => parseSubnets(extraText), [extraText])
   const extraInvalid = extra.errors.length > 0 || extra.overLimit
 
+  // 裁剪格式校验：空串=不裁剪；否则必须 宽:高:x:y（4 个非负整数，宽高 > 0）。
+  // 非法格式不拦 UI、只在保存时禁用，避免手打过程中被打断。
+  const cropInvalid = useMemo(() => {
+    const c = (draft.session.crop ?? '').trim()
+    if (!c) return false
+    const m = /^(\d+):(\d+):(\d+):(\d+)$/.exec(c)
+    if (!m) return true
+    return Number(m[1]) <= 0 || Number(m[2]) <= 0
+  }, [draft.session.crop])
+
   /** 测试识别：对当前投屏会话截屏识别，验证模型是否可用 */
   const runOcrTest = async (): Promise<void> => {
     setOcrTesting(true)
@@ -128,7 +138,7 @@ export function SettingsPanel({
   const save = (): void => {
     // 额外网段存归一化后的形态（192.168.50 → 192.168.50.0/24），下次打开能直接看出它到底扫哪儿；
     // 非法/超限时保存按钮是禁用的，这里再兜一层，避免走到"存进去但解析不了"的状态。
-    if (extraInvalid) return
+    if (extraInvalid || cropInvalid) return
     void updateSettings({ ...draft, extraScanSubnets: extra.display })
     onClose()
   }
@@ -272,6 +282,62 @@ export function SettingsPanel({
         <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
           码率 <b>0</b> = 默认约 8 Mbps；分辨率 <b>0</b> = 设备原生（如 1920 / 2560）；帧率 <b>0</b> = 不限制。
         </div>
+
+        <div className="field">
+          <label>裁剪（W:H:X:Y）</label>
+          <input
+            className="text-input"
+            value={draft.session.crop ?? ''}
+            placeholder="留空不裁剪（如 1224:1440:0:0）"
+            onChange={(e) => patchSession({ crop: e.target.value.trim() })}
+          />
+          {cropInvalid ? (
+            <div className="hint" style={{ color: 'var(--red, #e74c3c)' }}>
+              格式应为 <code>宽:高:x:y</code> 四个非负整数，且宽、高需大于 0
+            </div>
+          ) : (
+            <div className="hint">
+              裁掉屏幕的一部分后再投屏（服务端裁剪后再编码，可减小分辨率与带宽）。
+              格式 <code>W:H:X:Y</code>，留空不裁剪。
+            </div>
+          )}
+        </div>
+
+        <div className="field">
+          <label>旋转</label>
+          <div className="seg" style={{ marginBottom: 10 }}>
+            {([0, 90, 180, 270] as const).map((a) => (
+              <button
+                key={a}
+                type="button"
+                className={(draft.session.angle ?? 0) === a ? 'active' : undefined}
+                onClick={() => patchSession({ angle: a })}
+              >
+                {a}°
+              </button>
+            ))}
+          </div>
+          <div className="hint">
+            把画面按顺时针旋转后再投屏（<b>服务端旋转后编码</b>，90°/270° 会宽高对调），
+            触控坐标自动跟着转，无需额外设置。适合把横屏游戏转成竖屏窗口看。
+          </div>
+        </div>
+
+        <div className="field">
+          <label>视频显示缓冲（毫秒）</label>
+          <input
+            className="text-input"
+            type="number"
+            min={0}
+            step={1}
+            value={draft.session.videoBuffer ?? 0}
+            onChange={(e) => patchSession({ videoBuffer: Math.max(0, Math.trunc(Number(e.target.value)) || 0) })}
+          />
+          <div className="hint">
+            <b>0</b> = 不缓冲（默认，延迟最低）。网络抖动大时调大（如 30~50）画面更平滑，代价是操作延迟增加。
+            <b>重新连接后生效</b>。
+          </div>
+        </div>
       </Section>
 
       <Section id="session" title="会话与操控">
@@ -324,6 +390,55 @@ export function SettingsPanel({
               需要 <b>Android 11 及以上</b>，低版本会自动退回无声，投屏不受影响。
               <br />
               本项<b>默认开启</b>（与官方 scrcpy 一致）。
+            </div>
+
+            <div className="field">
+              <label>音频编码器（可选）</label>
+              <input
+                className="text-input"
+                value={draft.session.audioEncoder ?? ''}
+                placeholder="留空自动选择（如 c2.android.opus.encoder）"
+                onChange={(e) => patchSession({ audioEncoder: e.target.value })}
+              />
+              <div className="hint">指定设备端 MediaCodec 音频编码器，留空由 scrcpy 自动选择。</div>
+            </div>
+
+            <div className="field row between">
+              <label style={{ margin: 0 }}>边播边录（设备外放同时出声）</label>
+              <Toggle checked={draft.session.audioDup === true} onChange={(v) => patchSession({ audioDup: v })} />
+            </div>
+            <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+              默认关：选「系统输出」时设备静音、声音只在电脑出。
+              开启后声音<b>既转发到电脑、又保留在设备外放</b>（适合投屏时手机也要出声的场景）。
+            </div>
+
+            <div className="field-grid">
+              <div className="field">
+                <label>音频缓冲（毫秒）</label>
+                <input
+                  className="text-input"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={draft.session.audioBuffer ?? 0}
+                  onChange={(e) => patchSession({ audioBuffer: Math.max(0, Math.trunc(Number(e.target.value)) || 0) })}
+                />
+              </div>
+              <div className="field">
+                <label>音频输出缓冲（毫秒）</label>
+                <input
+                  className="text-input"
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={draft.session.audioOutputBuffer ?? 0}
+                  onChange={(e) => patchSession({ audioOutputBuffer: Math.max(0, Math.trunc(Number(e.target.value)) || 0) })}
+                />
+              </div>
+            </div>
+            <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
+              音频缓冲越大越抗抖、延迟越高；输出缓冲越小延迟越低、越易爆音。
+              <b>0</b> = 用内置调优默认（80ms / 20ms）。声音卡顿/断续时调大，追求低延迟时调小。
             </div>
           </>
         )}
@@ -712,17 +827,19 @@ export function SettingsPanel({
 
       {/* 保存栏固定在抽屉底部：分区多了以后，滚到哪儿都能看到"还没保存" */}
       <div className="settings-foot">
-        <span className={`settings-foot-note ${extraInvalid ? 'err' : dirty ? 'warn' : ''}`}>
-          {extraInvalid
-            ? '「额外扫描网段」有无法解析或超出上限的条目'
-            : dirty
-              ? '有未保存的修改'
-              : ''}
+        <span className={`settings-foot-note ${extraInvalid || cropInvalid ? 'err' : dirty ? 'warn' : ''}`}>
+          {cropInvalid
+            ? '「裁剪」格式不正确（应为 宽:高:x:y）'
+            : extraInvalid
+              ? '「额外扫描网段」有无法解析或超出上限的条目'
+              : dirty
+                ? '有未保存的修改'
+                : ''}
         </span>
         <button
           className="btn btn-primary"
-          disabled={extraInvalid}
-          title={extraInvalid ? '额外扫描网段有无法解析或超出上限的条目，请先修正' : undefined}
+          disabled={extraInvalid || cropInvalid}
+          title={cropInvalid ? '「裁剪」格式不正确，请先修正' : extraInvalid ? '额外扫描网段有无法解析或超出上限的条目，请先修正' : undefined}
           onClick={save}
         >
           保存设置
