@@ -1,6 +1,6 @@
 # QZRS Scrcpy
 
-一个现代、独立的 PC 端 Android 投屏与控制客户端。基于 Electron + React + TypeScript，**按 scrcpy 4.1 的开源协议规范独立实现了 PC 端**（未复用 scrcpy 客户端源码，设备端复用官方 scrcpy-server），UI 经过重新设计，支持多设备群控、键鼠操作、截屏录屏、剪贴板同步、按键映射、脚本自动化、文件传输与 ADB 终端。
+一个现代、独立的 PC 端 Android 投屏与控制客户端。基于 Electron + React + TypeScript，**按 scrcpy 5.0.1 的开源协议规范独立实现了 PC 端**（未复用 scrcpy 客户端源码，设备端复用官方 scrcpy-server），UI 经过重新设计，支持多设备群控、键鼠操作、截屏录屏、剪贴板同步、按键映射、脚本自动化、文件传输与 ADB 终端。
 
 > 工作链路：`adb push → adb forward → app_process 启动官方 scrcpy-server → 三路 socket（video/control）→ WebCodecs 解码 H.264`。
 

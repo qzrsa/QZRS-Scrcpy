@@ -182,7 +182,7 @@ export class ScrcpySession {
       '-s', this.serial, 'shell',
       'CLASSPATH=/data/local/tmp/scrcpy-server.jar',
       'app_process', '/', 'com.genymobile.scrcpy.Server',
-      '4.1',
+      '5.0.1',
       `scid=${this.scid.toString(16).padStart(8, '0')}`,
       'log_level=info',
       `video_codec=${o.codec}`,

@@ -1,7 +1,7 @@
 import type { ControlCommand, PointerId } from '@shared/types'
 
 /**
- * Control message encoding for the scrcpy 4.x control protocol.
+ * Control message encoding for the scrcpy 5.x control protocol.
  * Byte layout mirrors sc_control_msg_serialize() in the scrcpy C client.
  * All multi-byte integers are big-endian.
  */
