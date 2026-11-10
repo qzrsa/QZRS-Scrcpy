@@ -26,3 +26,6 @@ resources/_icon_backup_*/
 # 上传/校验工具：.tmp/upload-ocr-release.cjs；模型溯源见 resources/ocr/README.md
 resources/ocr/*.onnx
 resources/ocr/*.txt
+
+# 运行时模型目录（resolveOcrModelDir 在开发态落在项目根，打包态落在安装目录）
+/ocr-models/

@@ -202,6 +202,9 @@ function rgbToNchw(
 
 // ===== OCR 引擎 =====
 
+/** 单次推理最多 2 个核：ort 默认吃满所有物理核，脚本轮询 OCR 时整机会被拖卡。 */
+const ORT_SESSION_OPTIONS: ort.InferenceSession.SessionOptions = { intraOpNumThreads: 2 }
+
 export class OcrEngine {
   private det: ort.InferenceSession | null = null
   private rec: ort.InferenceSession | null = null
@@ -238,9 +241,9 @@ export class OcrEngine {
       if (missing.length > 0) {
         throw new Error(`OCR 模型未下载（缺 ${missing.join('、')}），请在「设置 → OCR 模型」里先下载`)
       }
-      this.det = await ort.InferenceSession.create(join(this.modelDir, DET_MODEL))
-      this.rec = await ort.InferenceSession.create(join(this.modelDir, REC_MODEL))
-      this.cls = await ort.InferenceSession.create(join(this.modelDir, CLS_MODEL))
+      this.det = await ort.InferenceSession.create(join(this.modelDir, DET_MODEL), ORT_SESSION_OPTIONS)
+      this.rec = await ort.InferenceSession.create(join(this.modelDir, REC_MODEL), ORT_SESSION_OPTIONS)
+      this.cls = await ort.InferenceSession.create(join(this.modelDir, CLS_MODEL), ORT_SESSION_OPTIONS)
       this.keys = readFileSync(join(this.modelDir, KEYS_FILE), 'utf8')
         .split(/\r?\n/)
         .filter((l) => l.length > 0)

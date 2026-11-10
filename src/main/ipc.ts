@@ -607,8 +607,134 @@ export function registerIpc(store: Store): AppManager {
   // ---- script engine ----
   // 用户 JS 脚本在主进程沙箱里跑，设备操作走与手动控制同一条 sendControl 链路。
   //
-  // waitImage 的 findTemplate：截屏（设备原始分辨率）+ nativeImage 解 PNG（不引新依赖）
-  // → 灰度 NCC 匹配 → 返回截屏坐标系下的匹配中心。坐标换算（截屏→视频像素）由引擎做。
+  // 视觉取帧只有一个入口 captureFrame：优先取投屏 canvas 的最后一帧（~10~60ms），
+  // 投屏未挂载/取帧失败再回退 adb screencap（~900ms、1.7MB）。canvas 帧是「视频分辨率」，
+  // screencap 是设备原始分辨率 —— 下面所有调用方都按 videoSizes 做比例换算，两种来源可互换。
+  const FRAME_TTL_MS = 120
+  type FrameShot = {
+    png: Buffer
+    /** BGRA 位图，同帧只解码一次 */
+    bmp: Uint8Array | null
+    width: number
+    height: number
+    at: number
+    src: 'canvas' | 'screencap'
+  }
+  const frameCache = new Map<string, FrameShot>()
+  const frameInflight = new Map<string, Promise<FrameShot | null>>()
+  const nativeSizes = new Map<string, { width: number; height: number }>()
+
+  const dropFrameCache = (sessionId: string): void => {
+    frameCache.delete(sessionId)
+    frameInflight.delete(sessionId)
+  }
+
+  /** 渲染层 canvas 直出最后一帧；投屏未挂载/窗口不可用时返回 null（不抛错） */
+  const frameFromCanvas = async (
+    sessionId: string
+  ): Promise<{ png: Buffer; width: number; height: number } | null> => {
+    const win = getWin()
+    if (!win || win.isDestroyed()) return null
+    const sid = JSON.stringify(sessionId)
+    try {
+      const res = (await win.webContents.executeJavaScript(
+        `(window.__qzrsFrameProviders && window.__qzrsFrameProviders[${sid}])` +
+          ` ? window.__qzrsFrameProviders[${sid}]()` +
+          ` : null`,
+        true
+      )) as { width: number; height: number; png: string } | null
+      if (!res || typeof res.png !== 'string' || res.png.length === 0) return null
+      if (!(res.width > 0) || !(res.height > 0)) return null
+      // canvas 在拿到第一帧之前是默认 300x150（或尺寸与视频不一致，如裁切/收到 meta 前），
+      // 这种帧不能当画面用 —— 只认与「视频尺寸」一致的帧，其余回退 screencap。
+      const vid = videoSizes.get(sessionId)
+      if (!vid) return null
+      if (Math.abs(vid.width - res.width) > 1 || Math.abs(vid.height - res.height) > 1) return null
+      return { png: Buffer.from(res.png, 'base64'), width: res.width, height: res.height }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 取一帧：TTL 内复用同一帧（脚本里连续几次识别只抓一次图），同会话并发调用共享一次取帧。
+   * 会话不存在或两条来源都失败返回 null。
+   * 注：窗口被遮挡/最小化时 Chromium 会把 canvas 回调节流到 ~1s（和 screencap 持平），
+   * 画面正常显示时才是 ~0.1s；两种来源结果一致，只是快慢差别。
+   */
+  const captureFrame = async (sessionId: string): Promise<FrameShot | null> => {
+    const h = sessions.get(sessionId)
+    if (!h) return null
+    const hit = frameCache.get(sessionId)
+    if (hit && Date.now() - hit.at <= FRAME_TTL_MS) return hit
+    const running = frameInflight.get(sessionId)
+    if (running) return running
+    const task = (async (): Promise<FrameShot | null> => {
+      const fast = await frameFromCanvas(sessionId)
+      if (fast) return { ...fast, bmp: null, at: Date.now(), src: 'canvas' }
+      const { nativeImage } = await import('electron')
+      const shot = await ensureAdb().screencap(h.serial)
+      const img = nativeImage.createFromBuffer(shot)
+      if (img.isEmpty()) return null
+      const size = img.getSize()
+      return {
+        png: shot,
+        bmp: new Uint8Array(img.toBitmap()),
+        width: size.width,
+        height: size.height,
+        at: Date.now(),
+        src: 'screencap'
+      }
+    })()
+      .then((r) => {
+        if (r) frameCache.set(sessionId, r)
+        else frameCache.delete(sessionId)
+        return r
+      })
+      .finally(() => {
+        frameInflight.delete(sessionId)
+      })
+    frameInflight.set(sessionId, task)
+    return task
+  }
+
+  /** 帧 → BGRA 位图（同帧只解码一次；会话不存在/取帧失败返回 null） */
+  const frameBitmap = async (
+    sessionId: string
+  ): Promise<{ bmp: Uint8Array; width: number; height: number } | null> => {
+    const f = await captureFrame(sessionId)
+    if (!f) return null
+    if (f.bmp) return { bmp: f.bmp, width: f.width, height: f.height }
+    const { nativeImage } = await import('electron')
+    const img = nativeImage.createFromBuffer(f.png)
+    if (img.isEmpty()) return null
+    const size = img.getSize()
+    f.bmp = new Uint8Array(img.toBitmap())
+    f.width = size.width
+    f.height = size.height
+    return { bmp: f.bmp, width: size.width, height: size.height }
+  }
+
+  /** 设备原始分辨率（wm size，按 serial 只查一次；查不到不缓存，返回 null） */
+  const nativeSize = async (serial: string): Promise<{ width: number; height: number } | null> => {
+    const hit = nativeSizes.get(serial)
+    if (hit) return hit
+    try {
+      const r = await ensureAdb().shell(serial, 'wm size', 8000)
+      const m = /(\d+)\s*x\s*(\d+)/.exec(r.stdout)
+      if (!m) return null
+      const size = { width: Number(m[1]), height: Number(m[2]) }
+      nativeSizes.set(serial, size)
+      return size
+    } catch {
+      return null
+    }
+  }
+
+  // waitImage 的 findTemplate：取一帧 → 灰度 NCC 匹配 → 返回该帧坐标系下的匹配中心
+  //（帧→视频像素的换算由引擎做，见 scriptengine.waitImage）。
+  // 模板按设备原始分辨率截取，canvas 帧被 max_size 等比缩小时按同比例缩模板；
+  // 旋转/裁切会让宽高比变化（比例换算不成立）→ 回退 screencap，行为与旧版一致。
   const findTemplate = async (
     sessionId: string,
     tplName: string,
@@ -617,42 +743,69 @@ export function registerIpc(store: Store): AppManager {
     const { nativeImage } = await import('electron')
     const tplPng = store.readTemplate(tplName)
     if (!tplPng) return null
-    const tplImg = nativeImage.createFromBuffer(tplPng)
+    let tplImg = nativeImage.createFromBuffer(tplPng)
     if (tplImg.isEmpty()) return null
-    const tplSize = tplImg.getSize()
     const h = sessions.get(sessionId)
     if (!h) return { found: false, x: 0, y: 0, score: 0, screenW: 0, screenH: 0 }
-    const shot = await ensureAdb().screencap(h.serial)
-    const shotImg = nativeImage.createFromBuffer(shot)
-    if (shotImg.isEmpty()) return { found: false, x: 0, y: 0, score: 0, screenW: 0, screenH: 0 }
-    const shotSize = shotImg.getSize()
-    const screen = toGray(bgraToRgba(new Uint8Array(shotImg.toBitmap())), shotSize.width, shotSize.height)
+    const shot = await captureFrame(sessionId)
+    if (!shot) return { found: false, x: 0, y: 0, score: 0, screenW: 0, screenH: 0 }
+    let useCanvas = shot.src === 'canvas'
+    let scale = 1
+    if (useCanvas) {
+      const nat = await nativeSize(h.serial)
+      const sameAspect = nat
+        ? Math.abs(nat.width / nat.height - shot.width / shot.height) < 0.02
+        : false
+      if (nat && sameAspect) scale = shot.width / nat.width
+      else useCanvas = false
+    }
+    let screenBmp: Uint8Array
+    let screenW: number
+    let screenH: number
+    if (useCanvas) {
+      let bmp = shot.bmp
+      if (!bmp) {
+        const img = nativeImage.createFromBuffer(shot.png)
+        if (img.isEmpty()) return { found: false, x: 0, y: 0, score: 0, screenW: 0, screenH: 0 }
+        const size = img.getSize()
+        bmp = new Uint8Array(img.toBitmap())
+        shot.bmp = bmp
+        shot.width = size.width
+        shot.height = size.height
+      }
+      screenBmp = bmp
+      screenW = shot.width
+      screenH = shot.height
+    } else {
+      const raw = await ensureAdb().screencap(h.serial)
+      const img = nativeImage.createFromBuffer(raw)
+      if (img.isEmpty()) return { found: false, x: 0, y: 0, score: 0, screenW: 0, screenH: 0 }
+      const size = img.getSize()
+      screenBmp = new Uint8Array(img.toBitmap())
+      screenW = size.width
+      screenH = size.height
+      scale = 1
+    }
+    if (Math.abs(scale - 1) > 0.01) {
+      const t = tplImg.getSize()
+      tplImg = tplImg.resize({ width: Math.max(8, Math.round(t.width * scale)), quality: 'good' })
+    }
+    const tplSize = tplImg.getSize()
+    const screen = toGray(bgraToRgba(screenBmp), screenW, screenH)
     const tpl = toGray(bgraToRgba(new Uint8Array(tplImg.toBitmap())), tplSize.width, tplSize.height)
     const m = matchTemplate(screen, tpl, threshold)
-    if (!m) return { found: false, x: 0, y: 0, score: 0, screenW: shotSize.width, screenH: shotSize.height }
-    return { found: true, x: m.x, y: m.y, score: m.score, screenW: shotSize.width, screenH: shotSize.height }
+    if (!m) return { found: false, x: 0, y: 0, score: 0, screenW, screenH }
+    return { found: true, x: m.x, y: m.y, score: m.score, screenW, screenH }
   }
 
-  // 找色/读色共用：截屏 → BGRA 位图 + 尺寸（会话不存在/截屏失败返回 null）
-  const captureBitmap = async (sessionId: string): Promise<{ bmp: Uint8Array; width: number; height: number } | null> => {
-    const { nativeImage } = await import('electron')
-    const h = sessions.get(sessionId)
-    if (!h) return null
-    const shot = await ensureAdb().screencap(h.serial)
-    const img = nativeImage.createFromBuffer(shot)
-    if (img.isEmpty()) return null
-    const size = img.getSize()
-    return { bmp: new Uint8Array(img.toBitmap()), width: size.width, height: size.height }
-  }
-
-  // 读「视频像素坐标」处的颜色（视频坐标 → 截屏坐标换算，截屏原始分辨率 vs 视频 maxSize 缩放）
+  // 读「视频像素坐标」处的颜色（视频坐标 → 帧坐标换算，帧可能被 maxSize 缩小过）
   const getPixelColor = async (
     sessionId: string,
     videoX: number,
     videoY: number
   ): Promise<{ r: number; g: number; b: number; hex: string } | null> => {
     const vid = videoSizes.get(sessionId)
-    const cap = await captureBitmap(sessionId)
+    const cap = await frameBitmap(sessionId)
     if (!vid || !cap || cap.width <= 0 || cap.height <= 0) return null
     const sx = Math.min(cap.width - 1, Math.max(0, Math.round((videoX * cap.width) / vid.width)))
     const sy = Math.min(cap.height - 1, Math.max(0, Math.round((videoY * cap.height) / vid.height)))
@@ -672,7 +825,7 @@ export function registerIpc(store: Store): AppManager {
     region: { x: number; y: number; w: number; h: number } | null
   ): Promise<{ found: boolean; x: number; y: number } | null> => {
     const vid = videoSizes.get(sessionId)
-    const cap = await captureBitmap(sessionId)
+    const cap = await frameBitmap(sessionId)
     if (!vid || !cap || cap.width <= 0 || cap.height <= 0) return null
     const sx = (vx: number): number => Math.min(cap.width, Math.max(0, Math.round((vx * cap.width) / vid.width)))
     const sy = (vy: number): number => Math.min(cap.height, Math.max(0, Math.round((vy * cap.height) / vid.height)))
@@ -700,14 +853,14 @@ export function registerIpc(store: Store): AppManager {
     return { found: false, x: -1, y: -1 }
   }
 
-  // OCR：截屏 → 视频坐标 region 换算成截屏坐标 → 按需 crop → OcrEngine 推理 → 坐标换算回视频。
-  // 会话不存在/截屏失败返回 null（引擎转成「OCR 失败」）；模型未就绪/推理失败抛错（脚本看到具体原因）。
+  // OCR：取一帧 → 视频坐标 region 换算成帧坐标 → 按需 crop → OcrEngine 推理 → 坐标换算回视频。
+  // 会话不存在/取帧失败返回 null（引擎转成「OCR 失败」）；模型未就绪/推理失败抛错（脚本看到具体原因）。
   const ocrText = async (
     sessionId: string,
     region: { x: number; y: number; w: number; h: number } | null
   ): Promise<OcrResult | null> => {
     const vid = videoSizes.get(sessionId)
-    const cap = await captureBitmap(sessionId)
+    const cap = await frameBitmap(sessionId)
     if (!vid || !cap || cap.width <= 0 || cap.height <= 0) return null
     const sx = (vx: number): number => Math.min(cap.width, Math.max(0, Math.round((vx * cap.width) / vid.width)))
     const sy = (vy: number): number => Math.min(cap.height, Math.max(0, Math.round((vy * cap.height) / vid.height)))
@@ -821,24 +974,11 @@ export function registerIpc(store: Store): AppManager {
       if (h) h.session.sendControl(cmd)
     },
     screenshot: async (serial) => ensureAdb().screencap(serial),
-    // 取帧：渲染层 MirrorView 按 sessionId 注册了帧提供器（canvas 直出最后一帧）。
-    // 主进程经 executeJavaScript 调用（返回 base64，~MB 级，IPC 开销可忽略）。
+    // 取帧：与脚本引擎共用 frameFromCanvas（渲染层 canvas 直出最后一帧）
     frame: async (sessionId) => {
-      const win = getWin()
-      if (!win || win.isDestroyed()) throw new BridgeHttpError(503, '主窗口不可用，无法取帧')
-      const sid = JSON.stringify(sessionId)
-      try {
-        const res = (await win.webContents.executeJavaScript(
-          `(window.__qzrsFrameProviders && window.__qzrsFrameProviders[${sid}])` +
-            ` ? window.__qzrsFrameProviders[${sid}]()` +
-            ` : Promise.reject(new Error('该会话的投屏组件未挂载（MirrorView 未显示）'))`,
-          true
-        )) as { width: number; height: number; png: string }
-        return { png: Buffer.from(res.png, 'base64'), width: res.width, height: res.height }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        throw new BridgeHttpError(503, `取帧失败（${msg}）；注意 frame 需要该会话的投屏画面已渲染`)
-      }
+      const f = await frameFromCanvas(sessionId)
+      if (!f) throw new BridgeHttpError(503, '取帧失败：需要该会话的投屏画面已渲染（MirrorView 已挂载）')
+      return { png: f.png, width: f.width, height: f.height }
     }
   })
 
@@ -1091,6 +1231,7 @@ export function registerIpc(store: Store): AppManager {
         const opts = h?.opts
         sessions.delete(sid)
         videoSizes.delete(sid)
+        dropFrameCache(sid)
         if (sessions.size === 0) stopStatsPolling()
         send('session:state', { sessionId: sid, serial, state: 'stopped' } satisfies SessionStateEvent)
         // 意外断开（用户主动停投屏会先置 disposed，不会走到这里）→ 尝试自动重连
@@ -1102,6 +1243,7 @@ export function registerIpc(store: Store): AppManager {
         const opts = h?.opts
         sessions.delete(sid)
         videoSizes.delete(sid)
+        dropFrameCache(sid)
         if (sessions.size === 0) stopStatsPolling()
         send('session:state', { sessionId: sid, serial, state: 'error', message } satisfies SessionStateEvent)
         log(`[错误] ${message}`)
@@ -1269,6 +1411,7 @@ export function registerIpc(store: Store): AppManager {
     if (h) await h.session.stop()
     sessions.delete(sessionId)
     videoSizes.delete(sessionId)
+    dropFrameCache(sessionId)
     if (sessions.size === 0) stopStatsPolling()
   })
 
@@ -1935,7 +2078,7 @@ export function registerIpc(store: Store): AppManager {
     if (!entry) return { ok: false, message: '请先连接设备并开始投屏' }
     const [sessionId] = entry
     try {
-      const cap = await captureBitmap(sessionId)
+      const cap = await frameBitmap(sessionId)
       if (!cap) return { ok: false, message: '截屏失败（会话可能已断开）' }
       const t0 = Date.now()
       const r = await ocrEngine.recognize(cap.bmp, cap.width, cap.height)
