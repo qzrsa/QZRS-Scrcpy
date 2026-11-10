@@ -6,21 +6,10 @@ import { delimiter } from 'node:path'
 import type { PyScriptFile, PyRunEvent } from '@shared/types'
 
 /**
- * Python 脚本管理器：扫描 scripts/python/*.py 列表 + 独立进程运行/停止。
- *
- * 与 JS 脚本引擎（node:vm 沙箱）不同，Python 脚本是**完全独立的进程**：
- * app 只负责 spawn / kill / 转发 stdout/stderr 日志，脚本自己通过 Python 桥
- * （qzrs.py → 127.0.0.1 HTTP）控制投屏会话。好处：
- *   - 重依赖（numpy/rapidocr/opencv）不进 app 进程，崩溃互不影响；
- *   - 7×24 挂机脚本与 app 生命周期解耦；
- *   - 沙箱/打包环境对 vm 沙箱的限制不再适用于 Python 生态。
- *
- * 环境注入（spawn 时）：
- *   - QZRS_TOKEN：当前桥 Token（未开桥则不注入），脚本可 `os.environ['QZRS_TOKEN']` 直取；
- *   - PYTHONPATH：前置桥客户端目录（qzrs.py 所在），脚本无需复制 qzrs.py 即可 import。
- *
- * 进程退出（含被杀）后统一调 hooks.releasePointers()：脚本可能死在
- * touch_down 之后没来得及 touch_up，桥上会留下悬挂的虚拟手指。
+ * Python 脚本管理器：扫描 scripts/python/*.py + 独立进程运行/停止。
+ * 与 JS 沙箱引擎不同，Python 跑独立进程，app 只负责 spawn/kill 与转发日志；
+ * 脚本经 Python 桥控制投屏。spawn 时注入 QZRS_TOKEN 与 PYTHONPATH（桥客户端目录）。
+ * 进程退出后必须调 hooks.releasePointers()，否则残留的虚拟手指会一直按着。
  */
 
 export interface PyScriptManagerHooks {

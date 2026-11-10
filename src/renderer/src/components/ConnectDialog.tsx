@@ -117,10 +117,8 @@ export function ConnectDialog({ onClose }: { onClose: () => void }): JSX.Element
 
             {!scanning && scanned?.ok && scanned.ips.length === 0 && (
               <div className="hint" style={{ marginTop: 6 }}>
-                未发现设备。请确认手机已开启无线调试（adb tcpip 5555）且与电脑在同一网段；
-                若手机在其它网段，可试用「深度扫描」（额外扫虚拟网卡网段）；
-                如果那个网段本机网卡上根本没有（跨 VLAN / 别的路由器），
-                要在<b>设置 → 额外扫描网段</b>里手动填上它。
+                未发现设备。确认已开启无线调试（adb tcpip 5555）且同网段；
+                跨 VLAN 时在<b>设置 → 额外扫描网段</b>里手动填写。
               </div>
             )}
 

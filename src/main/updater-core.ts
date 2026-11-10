@@ -137,18 +137,10 @@ export function removalList(p: ManifestPatch): string[] {
 }
 
 /**
- * 程序目录里**属于用户**的顶层目录，更新器绝不读、不写、不删。
- *
- * 为什么这份名单在本文件（而不是 updater.ts）：清单自检、本机扫描、助手脚本
- * 三处都要用它，放在纯逻辑层可以保证"生成清单的脚本"和"应用更新的客户端"
- * 拿到的是同一份定义 —— 两边各写一份迟早漂移，而漂移的后果是更新器去覆盖
- * 用户的按键方案 / 脚本 / 下载好的 OCR 模型。
- *
- * - `keymaps`     用户按键方案（安装目录/keymaps，权限不足时回退到 userData）
- * - `scripts`     用户脚本与 waitImage 模板
- * - `logs`        调试日志
- * - `ocr-models`  用户下载的 OCR 模型（约 16MB，不在安装包里）
- * - `.update`     更新器自己的暂存区（下载中的 zip、apply.json、apply.log）
+ * 用户目录白名单：更新器不读、不写、不删。
+ * 定义必须只在这里——清单生成、本机扫描、助手脚本三处共用；
+ * 各写一份迟早漂移，漂移的后果是覆盖用户的按键方案/脚本/OCR 模型。
+ * keymaps / scripts / logs / ocr-models / .update
  */
 export const PROTECTED_TOP: readonly string[] = [
   'keymaps',

@@ -3,22 +3,10 @@ import { join } from 'node:path'
 import * as ort from 'onnxruntime-node'
 
 /**
- * OCR 推理引擎（PaddleOCR ONNX，RapidOCR 预转换模型，纯 JS 后处理）。
- *
- * 与 onnxruntime-node 直接对接，跑在 Electron 主进程（onnxruntime-node 用 N-API，
- * Electron 可直接加载，无需 electron-rebuild）。模型文件由 ocrdownload.ts 从
- * GitHub Release 下载到本地模型目录，**不进安装包**。
- *
- * 管线（对齐 PaddleOCR/RapidOCR 标准实现）：
- *   1. det 文本检测：resize(32 倍数, 短边上限 960) → ImageNet 归一化 → DB 推理
- *      → heatmap 二值化 → 连通域 → 轴对齐 bbox + unclip 扩张 → 映射回原图坐标。
- *   2. cls 角度分类（可选）：每个框 crop → resize 48×192 → 归一化 → 二分类(0°/180°)，
- *      180° 时把 crop 旋转 180° 再识别。
- *   3. rec 文本识别：每个框 crop → resize 高 48（宽按比例，上限 320）→ (p/255-0.5)/0.5
- *      → CTC 推理 → 贪心解码（去重 + 去 blank）→ 字典映射。
- *
- * 坐标约定：recognize 的输入是位图，返回的 box 是**相对这张位图**的像素坐标；
- * 视频↔截屏的换算由 ipc.ts 负责。
+ * OCR 推理引擎（PaddleOCR ONNX 模型，纯 JS 后处理，跑在主进程）。
+ * 管线：det 检测 → cls 角度分类（可选，180° 先转正）→ rec 识别（CTC 贪心解码）。
+ * 模型由 ocrdownload.ts 下载到本地目录，不进安装包。
+ * 返回的 box 是相对输入位图的像素坐标；视频↔截屏换算由 ipc.ts 负责。
  */
 
 // ===== 检测参数（PaddleOCR DB 默认值）=====

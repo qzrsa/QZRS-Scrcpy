@@ -4,17 +4,10 @@ import { net } from 'electron'
 import { OCR_GITHUB_URL_TEMPLATE, OCR_MODELS, resolveOcrModelDir, verifyModelFile, type OcrModelEntry } from './ocrmodels'
 
 /**
- * OCR 模型下载器：从 GitHub Release（默认源）拉模型到本地模型目录。
- *
- * 关键选型：
- * - **electron.net 而非 node:https**：走 Chromium 网络栈，自动继承系统代理
- *   （"代理环境"不需要我们写任何代码），重定向（GitHub → objects.githubusercontent.com）
- *   也默认跟随。
- * - **散文件逐个下**：每个模型单独校验、单独重试，10.9MB 的 rec 失败不用重拉 4.7MB 的 det。
- * - **.part 临时文件**：下完校验通过才 rename 成正式名，半截文件永远不会被误判为已就绪。
- * - **SHA256 兜底**：大小对上了但内容坏（代理注入页面等）也会在校验环节拦下重下。
- *
- * 进度事件 phase: downloading → verifying → done | error。
+ * OCR 模型下载器：从 GitHub Release 逐个拉模型到本地目录。
+ * 用 electron.net（继承系统代理、自动跟重定向）而非 node:https。
+ * 先写 .part，校验通过才 rename；大小与 SHA256 双重校验，坏文件自动重下。
+ * 进度 phase：downloading → verifying → done | error。
  */
 
 export type OcrProgressPhase = 'downloading' | 'verifying' | 'done' | 'error'

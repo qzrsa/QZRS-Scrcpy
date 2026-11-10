@@ -966,7 +966,7 @@ export function ScriptPanel({ sessionId, sessionLabel, serial, onClose, onToast,
                 取消
               </button>
             </div>
-            <div className="hint">在截图上拖一个框（框住要找的按钮/图标），保存后点左侧模板项即可插入 waitImage 调用。名字会自动清理非法字符。</div>
+            <div className="hint">在截图上拖框圈住目标，保存后点左侧模板项插入 waitImage 调用。</div>
           </div>
         </div>
       </div>

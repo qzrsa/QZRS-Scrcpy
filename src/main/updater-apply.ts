@@ -1,33 +1,10 @@
 /**
- * 生成"退出之后才运行"的那段助手脚本（纯字符串拼装，不碰 fs、不起进程）。
- *
- * ★★ 为什么要一个"退出后"的助手：Windows 上**正在运行的 exe 是不可覆盖的**，
- *    连 `resources/*.dll` 也被映射着。所以只能自己先退出，让另一个进程去换文件。
- *
- * ★★ 为什么不直接 spawn powershell（这是实测踩出来的坑）：
- *    ① `detached: true` 会让 libuv 带上 `DETACHED_PROCESS`，而 powershell.exe 在
- *       这种"完全没有控制台"的形态下**一行脚本都不执行就 exit 0** —— 现象就是
- *       「点了重启并更新 → 程序关掉 → 什么都没发生 → 重开还是旧版」。
- *    ② 这台机器上 **PowerShell 一旦成为孤儿进程就会被结束**（父进程一退，它连第一条
- *       语句都没跑完；同样条件下 cmd.exe 却活得好好的）。
- *    所以交接方式是「**cmd 当中间父母**」：本进程 spawn 一个 cmd，由 cmd 去跑 PowerShell。
- *    `cmd /c` 是同步的，它会一直等着 PowerShell，于是 PowerShell 始终有个活着的父进程；
- *    cmd 自己被孤儿化没问题。这条链路是**实测过**的，别再"简化"回去。
- *
- * ★★ 为什么脚本落成 `apply.ps1` 而不是 `-EncodedCommand`：
- *    cmd 的命令行总长不能超过 8191 字符，而这段脚本 base64 之后有十几 KB —— 塞不进去。
- *    `-File` 没这个限制。原本选 `-EncodedCommand` 是为了躲代码页问题，
- *    落成文件时用**带 BOM 的 UTF-8** 写就同样解决了（PowerShell 5.1 见到 BOM 就按
- *    UTF-8 读，中文路径不会废）。脚本落在暂存目录里，更新成功后随暂存区一起删掉。
- *
- * ★★ 助手**不信任** apply.json：它拿到的 protectedTop 名单是主进程从 updater-core
- *    （唯一那份定义）注入进来的，并且对每一条路径**再挡一次**
- *    （`..`、绝对路径、受保护顶层目录）。纵深防御 —— 更新器最要命的失败是删掉用户的 keymaps/。
- *
- * ★★ 换文件用的是"先落 `.qzrs-new`，再逐个 `Move-Item -Force`"：
- *    同卷内的 Move 是原子替换，中途断电/被杀也**不会留下半截的 exe**。
- *    顺序上把 `*.exe` 放到最后 —— 真正的程序代码在 `resources/app.asar` 里，
- *    它先到位，万一后面失败，旧 exe + 新 asar 仍然跑得起来。
+ * 生成"退出后才运行"的助手脚本（纯字符串拼装）。
+ * 必须让 cmd 当中间父进程去跑 PowerShell：直接 detached spawn 会让 powershell 无控制台
+ * 直接 exit 0，或父进程一退就被结束（实测踩过，别再"简化"）。
+ * 脚本落成带 BOM 的 apply.ps1 而非 -EncodedCommand（cmd 命令行 8191 上限）。
+ * 助手不信任 apply.json：受保护目录名单由主进程注入并逐条再校验。
+ * 换文件先落 `.qzrs-new` 再 Move-Item -Force（同卷原子替换），exe 放最后。
  */
 
 /** 助手脚本在暂存目录里的文件名（落盘、带 BOM 写） */

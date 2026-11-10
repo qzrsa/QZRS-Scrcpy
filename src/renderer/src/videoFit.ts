@@ -1,24 +1,8 @@
 /**
- * 镜像画布的显示尺寸计算。
- *
- * 背景：`canvas` 的 `width/height` 属性是**解码缓冲尺寸**（设备编码分辨率），同时也是 CSS 里
- * `width/height: auto` 的布局基准。这带来两个纯 CSS 解决不了的问题：
- *
- *   1. **只能压小，不能放大**：`max-width/max-height: 100%` 对以 intrinsic size 为基准的画布
- *      只起压缩作用。视频比窗口小时，画布永远停在解码尺寸，窗口拖多大都不变。
- *   2. **竖屏画布会被裁**：`.mirror-wrap` 的高度是 auto（flex 交叉轴不拉伸），而 CSS 规定
- *      百分比 `max-height` 遇到"高度取决于内容"的包含块时按 `none` 处理 —— 于是画布的
- *      `max-height: 100%` 实际失效，但 `max-width: 100%` 生效（flex 主轴尺寸是确定的）。
- *      结果"宽度能压、高度压不住"，竖屏画布按宽度算出的高度远超 stage，溢出后被
- *      `.stage { overflow: hidden }` 裁掉大半（实测只剩 30%~60% 可见）。
- *
- * 所以改成主动计算：按「等比缩放 + 完整可见」求出显示尺寸，由调用方写成**显式像素**。
- * 这样画布盒子 == 画面矩形，`getBoundingClientRect()` 之后的坐标映射（触摸换算、
- * 按键覆盖层、按键编辑器）全部照旧成立。
- *
- * ⚠️ 因此**不能**改用 `width/height:100% + object-fit: contain`：那样画布盒子会变成整个容器，
- * 画面被 letterbox 装在盒子里，`getBoundingClientRect()` 拿到的是盒子而不是画面，
- * 上面三处坐标映射会整体偏移。
+ * 镜像画布的显示尺寸计算：按「等比缩放 + 完整可见」算出显式像素。
+ * 纯 CSS 做不到——画布只能被压小不能放大，且竖屏时百分比 max-height 会失效导致被裁。
+ * ⚠️ 不要改成 width/height:100% + object-fit: contain：画布盒子会变成整个容器，
+ * getBoundingClientRect() 拿到盒子而非画面，触摸/按键覆盖层的坐标映射会整体偏移。
  */
 
 export interface Size {

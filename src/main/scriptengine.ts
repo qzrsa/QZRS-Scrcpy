@@ -3,19 +3,11 @@ import type { ControlCommand, ScriptInfo, ScriptRunEvent, WaitImageResult } from
 import type { OcrResult } from './ocr'
 
 /**
- * 脚本执行引擎：把用户 JS 放进 node:vm 沙箱，以 async IIFE 运行。
- *
- * 沙箱只暴露一套设备操作 API（tap/swipe/text/key/wait/log），拿不到 process /
- * require / fs —— 想碰设备只能通过这些 API，每个 API 底层就是一个 ControlCommand
- * （复用 scrcpy 控制协议，与按键映射同一条链路）。
- *
- * 坐标约定：脚本里的 (x, y) 是视频像素坐标（与调试浮层一致），引擎运行时按
- * 会话当前视频宽高换算成 scrcpy 要的归一化参数（协议本身要求传 width/height）。
- *
- * 每个运行（run）独立；同一脚本可对多个会话并发运行，运行之间没有共享状态。
- * 停止 = 置 stop 标志 + 唤醒所有挂起的 wait；下一个 API 调用点抛出 StoppedError
- * 结束整个脚本，已发出的触摸指令不回滚（手指不会卡住：tap 类操作 DOWN/UP 成对，
- * 停止只可能发生在两步之间，UP 永远会发出后才检查停止标志）。
+ * 脚本执行引擎：用户 JS 放进 node:vm 沙箱，以 async IIFE 运行。
+ * 沙箱只暴露 tap/swipe/text/key/wait/log 等设备 API，每个底层就是一个 ControlCommand
+ * （与按键映射同一条链路）；拿不到 process/require/fs。
+ * 坐标是视频像素，运行时按会话视频宽高换算成协议参数。
+ * 每个 run 独立；停止 = 置标志 + 唤醒 wait，在下一个 API 调用点抛 StoppedError。
  */
 
 /** 停止标志专用错误；用户代码抓不到它（沙箱 API 层统一转成 'stopped' 事件） */

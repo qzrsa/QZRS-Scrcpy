@@ -1,22 +1,8 @@
 /**
  * 录制键盘 → 脚本代码行。
- *
- * 键盘和手指走的是两条完全不同的下发路径，所以录出来的代码也不一样：
- *
- *   1. 没有按键映射（或当前方案里没有这个键）→ 发的是 Android keycode，
- *      录成 `await key('BACK')`；按住多久写第二参数 `await key('A', 1200)`。
- *   2. 映射动作是 keycode → 同样是 key 调用，只是 keycode 来自映射。
- *   3. 映射动作是手势（tap / hold / repeat / view / swipe / WASD 摇杆）→
- *      手机上收到的是**触点**不是按键。脚本里没有"按键映射"这一层，所以直接
- *      按映射坐标录成 `tap()` / `swipe()`：回放不用先挂方案，换台设备也能跑。
- *
- * 取舍说明：
- *   - Shift / Ctrl / Alt 单独按下不录，折进下一个键的 metastate
- *     （Ctrl+E 录成 `key('E', 0, 4096)`），不然会录出一堆没意义的 CTRL_LEFT。
- *   - 系统自动重复（e.repeat）不录 —— 按住一个键会刷出几十条同样的记录。
- *   - 停顿时长规则与手势录制共用 recordGapLine（同一份 200ms 阈值 / 50ms 取整）。
- *   - hold / repeat / view / 摇杆都要等**抬手**才知道按了多久，所以按下时返回 null，
- *     由调用方存下按下时刻再交给 up。
+ * 无映射/映射为 keycode → 录 `key(...)`；映射为手势 → 直接按映射坐标录 tap/swipe（回放不依赖方案）。
+ * Shift/Ctrl/Alt 不单独录，折进下一键的 metastate；系统自动重复不录。
+ * hold/repeat/view/摇杆需等抬手才知道时长，按下时返回 null，由调用方回传按下时刻。
  */
 import { recordGapLine } from './recordgesture'
 import type { RecordedGesture } from './recordgesture'

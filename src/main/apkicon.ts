@@ -1,15 +1,7 @@
 /**
- * 应用图标提取（APK 资源解析）
- *
- * 现代 App 经 AAPT2 资源混淆后，图标文件不再是 `ic_launcher.png` 这种可猜文件名，
- * 而是短随机名（如 `res/BWP.xml`、`res/zra.png`）。要可靠拿到图标，必须：
- *
- *   1. 解析 AndroidManifest.xml（binary XML）→ application 元素的 `android:icon` 资源 ID
- *   2. 解析 resources.arsc → 把资源 ID 映射到真实文件路径（可能跨多个 density config）
- *   3. 若路径是 adaptive icon XML（`*.xml`），再解析它的 foreground → 资源 ID → PNG 路径
- *
- * 全部逻辑为纯函数，输入是 exec-out 提取出的干净二进制 Buffer。
- * 结构参照 AOSP ResourceTypes.h（ResChunk_header / ResStringPool / ResTable_type）。
+ * 应用图标提取：解析 binary manifest 拿 android:icon 资源 ID →
+ * 解析 resources.arsc 映射到真实文件 → 若是 adaptive XML 再解 foreground。
+ * 纯函数，输入是 exec-out 提取的干净二进制；结构参照 AOSP ResourceTypes.h。
  */
 
 // ---------------------------------------------------------------------------

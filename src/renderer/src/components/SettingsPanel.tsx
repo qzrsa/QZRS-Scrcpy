@@ -177,10 +177,7 @@ export function SettingsPanel({
           <Toggle checked={draft.mirrorAutoFit !== false} onChange={(v) => patch({ mirrorAutoFit: v })} />
         </div>
         <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-          按「等比缩放 + 完整可见」让画面随窗口大小变化，窗口模式和全屏都生效，画面<b>不会被拉长或拉宽</b>
-          （竖屏设备全屏时两侧留黑边，不再横向拉伸变形）。
-          <br />
-          关闭后回到原来的行为：窗口模式按解码分辨率显示（窗口拖大画面不动），全屏铺满整个窗口。
+          等比缩放、完整可见，窗口与全屏都生效，画面不会被拉变形。关闭后按解码分辨率显示。
         </div>
 
         <div className="field">
@@ -193,7 +190,7 @@ export function SettingsPanel({
             <option value="overlay">覆盖层（仅隐藏侧边栏和工具栏）</option>
             <option value="window">系统级全屏（F12 进入独占全屏）</option>
           </select>
-          <div className="hint">覆盖层：适合投屏小窗；系统级全屏：按 F12 让窗口独占整个显示器（含任务栏消失）</div>
+          <div className="hint">覆盖层适合小窗；系统级全屏按 F12 独占整块显示器</div>
         </div>
       </Section>
 
@@ -226,7 +223,7 @@ export function SettingsPanel({
             placeholder="留空自动选择（如 c2.android.avc.encoder）"
             onChange={(e) => patchSession({ videoEncoder: e.target.value })}
           />
-          <div className="hint">指定设备端 MediaCodec 编码器，留空由 scrcpy 自动选择。常用：c2.android.avc.encoder（软件）、c2.qti.avc.encoder（高通硬编）</div>
+          <div className="hint">留空由 scrcpy 自动选择。常用：c2.android.avc.encoder（软编）、c2.qti.avc.encoder（高通硬编）</div>
         </div>
 
         <div className="field">
@@ -297,8 +294,7 @@ export function SettingsPanel({
             </div>
           ) : (
             <div className="hint">
-              裁掉屏幕的一部分后再投屏（服务端裁剪后再编码，可减小分辨率与带宽）。
-              格式 <code>W:H:X:Y</code>，留空不裁剪。
+              服务端裁剪后再编码，可降低分辨率与带宽。格式 <code>W:H:X:Y</code>，留空不裁剪。
             </div>
           )}
         </div>
@@ -318,8 +314,7 @@ export function SettingsPanel({
             ))}
           </div>
           <div className="hint">
-            锁定投屏方向（<b>服务端按该方向旋转后编码</b>，90°/270° 宽高会对调），
-            触控坐标自动跟着转，无需额外设置。0° = 跟随设备当前方向。
+            锁定投屏方向，90°/270° 宽高对调，触控坐标自动跟随。0° = 跟随设备。
           </div>
         </div>
 
@@ -334,8 +329,7 @@ export function SettingsPanel({
             onChange={(e) => patchSession({ videoBuffer: Math.max(0, Math.trunc(Number(e.target.value)) || 0) })}
           />
           <div className="hint">
-            <b>0</b> = 不缓冲（默认，延迟最低）。网络抖动大时调大（如 30~50）画面更平滑，代价是操作延迟增加。
-            <b>重新连接后生效</b>。
+            <b>0</b> = 不缓冲（默认，延迟最低）。抖动大时调大（30~50）更平滑。重连后生效。
           </div>
         </div>
       </Section>
@@ -384,12 +378,7 @@ export function SettingsPanel({
               </select>
             </div>
             <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-              选「系统输出」时<b>设备自身会静音</b>（scrcpy 语义，避免双方同时出声），声音改从电脑扬声器播出；
-              不想让手机静音就改选「麦克风」或关掉本开关。
-              <br />
-              需要 <b>Android 11 及以上</b>，低版本会自动退回无声，投屏不受影响。
-              <br />
-              本项<b>默认开启</b>（与官方 scrcpy 一致）。
+              选「系统输出」时设备会静音（scrcpy 语义），声音改从电脑出。需 Android 11+，低版本自动退回无声。
             </div>
 
             <div className="field">
@@ -400,7 +389,7 @@ export function SettingsPanel({
                 placeholder="留空自动选择（如 c2.android.opus.encoder）"
                 onChange={(e) => patchSession({ audioEncoder: e.target.value })}
               />
-              <div className="hint">指定设备端 MediaCodec 音频编码器，留空由 scrcpy 自动选择。</div>
+              <div className="hint">留空由 scrcpy 自动选择。</div>
             </div>
 
             <div className="field row between">
@@ -408,8 +397,7 @@ export function SettingsPanel({
               <Toggle checked={draft.session.audioDup === true} onChange={(v) => patchSession({ audioDup: v })} />
             </div>
             <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-              默认关：选「系统输出」时设备静音、声音只在电脑出。
-              开启后声音<b>既转发到电脑、又保留在设备外放</b>（适合投屏时手机也要出声的场景）。
+              开启后声音既转发到电脑、又保留设备外放。默认关（选「系统输出」时设备静音）。
             </div>
 
             <div className="field-grid">
@@ -437,8 +425,7 @@ export function SettingsPanel({
               </div>
             </div>
             <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-              音频缓冲越大越抗抖、延迟越高；输出缓冲越小延迟越低、越易爆音。
-              <b>0</b> = 用内置调优默认（80ms / 20ms）。声音卡顿/断续时调大，追求低延迟时调小。
+              缓冲越大越抗抖、延迟越高。<b>0</b> = 内置默认（80ms / 20ms）。
             </div>
           </>
         )}
@@ -483,12 +470,8 @@ export function SettingsPanel({
             onChange={(e) => setExtraText(e.target.value)}
           />
           <div className="hint">
-            支持 <code>192.168.50</code>（整个 /24）、<code>192.168.50.0/24</code>、
-            <code>10.0.0.0/22</code>，或 <code>192.168.9.7</code> 单台设备；
-            也可以写 <code>192.168.50.0/255.255.255.0</code> 这种点分掩码。多行、逗号、空格分隔都认。
-            <br />
-            用途：设备挂在其它 VLAN / 另一台路由器下时，本机网卡上没有这个网段，
-            自动扫描永远看不到它。留空即关闭。
+            支持 <code>192.168.50</code>、<code>10.0.0.0/22</code>、单台 IP、点分掩码；多行/逗号/空格分隔。
+            用于设备挂在其它 VLAN、本机网卡上看不到的情况。留空即关闭。
           </div>
 
           {extra.errors.length > 0 && (
@@ -501,8 +484,7 @@ export function SettingsPanel({
 
           {extra.overLimit && (
             <div className="hint" style={{ color: 'var(--red, #e74c3c)', marginTop: -4 }}>
-              ✗ 合计 {extra.totalAddresses} 个地址，超过上限 {MAX_EXTRA_ADDRESSES} 个（约 /20）。
-              端口扫描没有更快的办法，再大就要跑很久了，请拆小一点。
+              ✗ 合计 {extra.totalAddresses} 个地址，超过上限 {MAX_EXTRA_ADDRESSES} 个（约 /20），请拆小一点。
             </div>
           )}
 
@@ -563,18 +545,11 @@ export function SettingsPanel({
               />
             </div>
             <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-              允许<b>本机</b> Python 脚本通过 HTTP 接口控制当前投屏会话：点按 / 滑动 / 按键 / 文本 / 截屏，
-              与内置 JS 脚本引擎共用同一条 scrcpy 控制链路，不往手机装任何东西。
-              仅监听 127.0.0.1，需 Bearer Token 鉴权；保存设置后生效。
+              让本机 Python 脚本通过 HTTP 控制当前投屏会话（仅 127.0.0.1，Bearer Token 鉴权）。
               <br />
-              Token（桥运行时显示，Python 客户端初始化用）：
+              Token：<code style={{ userSelect: 'all' }}>{bridgeStatus?.running ? bridgeStatus.token : '（启用后显示）'}</code>
               <br />
-              <code style={{ userSelect: 'all' }}>{bridgeStatus?.running ? bridgeStatus.token : '（保存设置并启用后显示）'}</code>
-              <br />
-              客户端库与示例写在
-              {' '}
-              <code style={{ userSelect: 'all' }}>{bridgeStatus?.clientDir || '%APPDATA%\\qzrs-scrcpy\\data\\bridge'}</code>
-              （<code>qzrs.py</code> 客户端 + <code>example.py</code> 示例，Python 仅需标准库）。
+              客户端与示例：<code style={{ userSelect: 'all' }}>{bridgeStatus?.clientDir || '%APPDATA%\\qzrs-scrcpy\\data\\bridge'}</code>
               <button className="btn" style={{ marginTop: 6 }} onClick={() => void window.api.openBridgeDir()}>
                 打开示例目录
               </button>
@@ -604,10 +579,9 @@ export function SettingsPanel({
           </span>
         </div>
         <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-          供脚本使用 <code>ocrText()</code> 在屏幕上读取文字（约 16MB，仅首次需要下载，下载到
+          供脚本 <code>ocrText()</code> 用（约 16MB，仅首次下载）→
           {' '}
           <code style={{ userSelect: 'all' }}>{ocr?.dir || '<安装目录>\\ocr-models'}</code>
-          ）。
           {ocrProgress?.phase === 'downloading' && ocrProgress.file && (
             <>
               <br />
@@ -681,10 +655,7 @@ export function SettingsPanel({
           <Toggle checked={draft.debugLog === true} onChange={(v) => patch({ debugLog: v })} />
         </div>
         <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-          在画面左下角叠加最近 6 条按键 / 触控记录（命中了哪条映射、发到哪个坐标），
-          <b>排查按键映射对不上时</b>打开看一眼即可，平时关着不占画面。
-          <br />
-          以前这是工具栏上的「D」按钮，现在挪到这里；<b>保存设置后生效</b>。
+          画面左下角叠加最近 6 条按键/触控记录，排查映射问题时打开。保存后生效。
         </div>
 
         <div className="field row between">
@@ -693,7 +664,7 @@ export function SettingsPanel({
         </div>
         {draft.debugLogToFile && (
           <div className="hint" style={{ marginTop: -6, marginBottom: 14 }}>
-            打开上面「显示按键调试日志」后，触控坐标/按键映射日志会<b>再</b>追加写入：
+            日志追加写入：
             <br />
             <code style={{ userSelect: 'all' }}>{logDir || '…'}\&lt;日期&gt;.log</code>
           </div>
@@ -804,24 +775,9 @@ export function SettingsPanel({
         </div>
 
         <div className="hint">
-          <b>安装版与绿色版都支持</b>自动更新（两者目录结构相同）；单文件便携版已停止发布
-          —— 它在运行中无法替换自己，本来就没法自更新。
-          <br />
-          启动时只<b>检查</b>一次（不轮询、不后台常驻），发现新版本会在左侧栏提示；
-          <b>下载与安装永远等你点</b>，不会偷偷替换文件。
-          <br />
-          下载优先走<b>差量</b>（只下和当前版本不同的数据块，常见能省 80% 以上流量）；
-          差量基准对不上（换过机器、手动改过程序文件）时自动退回全量整包，<b>不会因此更新失败</b>。
-          <br />
-          更新只替换程序文件，<b>按键方案 / 脚本 / 日志 / OCR 模型</b>（安装目录下的
-          <code>keymaps</code>、<code>scripts</code>、<code>logs</code>、<code>ocr-models</code>）一律不碰。
-          <br />
-          装到 <code>Program Files</code> 这类需要管理员权限的目录时无法自更新（写不进去），
-          安装时选「用户目录」或非系统盘即可。
-          <br />
-          更新源填镜像或代理时应指向"一次 Release 的资产目录"，例如
-          <code style={{ userSelect: 'all' }}>https://ghproxy.example/https://github.com/qzrsa/QZRS-Scrcpy/releases/latest/download</code>
-          。改了更新源需先<b>保存设置</b>，下一次检查才生效。
+          启动时检查一次；<b>下载与安装永远等你点</b>。优先走差量，基准对不上自动退回全量。
+          只替换程序文件，<code>keymaps</code>/<code>scripts</code>/<code>logs</code>/<code>ocr-models</code> 不碰。
+          装到 <code>Program Files</code> 等需管理员权限的目录无法自更新。
         </div>
       </Section>
 
@@ -903,18 +859,8 @@ function Section(props: {
 }
 
 /**
- * 更新卡片的两行文案：状态行 + 补充原因（没有可补充的就是空串）。
- *
- * 主进程给了 statusText 与 reason 两份信息，用途不同：前者是"阶段"，后者是"为什么"。
- * 但有两处会撞车，直接并排渲染就成了用户看到的：
- *
- *   v1.4.1  已是最新版本                                  ← statusText
- *   已是最新版本                                          ← reason（一字不差）
- *
- * 所以这里的规则是：
- *   1. `available` 时把目标版本号**并进状态行**（"发现新版本 v1.4.2"），和侧栏提示同一口径；
- *   2. reason 与状态行一字不差 → 丢掉（uptodate / downloading 这类阶段名本身就是答案）；
- *   3. 其余 reason 保留 —— 它们才有信息量（更新源没有清单 / 清单属于别的程序 / 具体报错）。
+ * 更新卡片文案：状态行 + 补充原因。
+ * available 时把版本号并进状态行；reason 与状态行重复则丢弃，其余保留。
  */
 function updateHeadText(u: UpdateSnapshot | null): { status: string; extra: string } {
   if (!u) return { status: '…', extra: '' }

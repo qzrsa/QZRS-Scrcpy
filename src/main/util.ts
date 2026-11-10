@@ -4,19 +4,11 @@ import { join, dirname } from 'node:path'
 import { app } from 'electron'
 
 /**
- * 「项目自带资源」的候选根目录列表。
- *
- * 不依赖 `app.isPackaged`（它在某些 electron-builder 配置下不可靠，
- * 曾导致 scrcpy-server 在便携版里找不到）。直接把所有可能的位置都试一遍，
- * 找到一个就返回。
- *
- * 各场景：
- * - 打包后（electron-builder extraResources 把 adb/scrcpy/scrcpy-server 打到 resources/）：
- *     1. process.resourcesPath             → .../resources/
- *     2. dirname(app.getAppPath())         → dirname('.../resources/app.asar') = .../resources/
- * - 开发模式（electron-vite，app.getAppPath() = 项目根 ScrcpyControl）：
- *     3. app.getAppPath()                  → ScrcpyControl/（项目自带 adb/scrcpy/ 在这）
- *     4. app.getAppPath()/resources        → ScrcpyControl/resources/（项目自带 scrcpy-server 在这）
+ * 「项目自带资源」的候选根目录：所有可能位置都试一遍，命中即返回。
+ * 不用 app.isPackaged 判断——它在部分 electron-builder 配置下不可靠，
+ * 曾导致便携版找不到 scrcpy-server。
+ * 打包后命中 process.resourcesPath / dirname(app.getAppPath())；
+ * 开发模式命中 app.getAppPath() 及其 resources/。
  */
 function resBases(): string[] {
   return [

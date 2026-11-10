@@ -177,15 +177,9 @@ export interface ScanOptions {
 const MAX_SCAN_ADDRESSES = 65536
 
 /**
- * 扫描局域网内开放 adb 端口的设备，返回 IP 列表（按数值升序）。
- *
- * 注意：`adb mdns services` 只能发现 Android 11+ 手动开启「无线调试」开关后
- * 广播 _adb-tls-connect._tcp 的设备；而 `adb tcpip 5555` 模式的设备不发 mDNS
- * 广播，只能靠端口扫描发现。本项目实测场景属于后者，故用端口扫描。
- *
- * 默认（快扫）只扫**物理网卡**网段 + 回环网段（排除 VPN/虚拟机网卡，本机实测约 0.85 秒）。
- * 若一台都没扫到，可用 allSubnets=true 兜底扫**全部网卡网段 + 回环网段**。
- * 另可用 ranges 直接指定区间（含用户手填的任意 CIDR / 单 IP）。
+ * 扫描局域网内开放 adb 端口的设备，按 IP 数值升序返回。
+ * 不用 adb mdns：`adb tcpip 5555` 模式的设备不发 mDNS 广播，只能端口扫描。
+ * 快扫只扫物理网卡 + 回环；allSubnets=true 兜底扫全部网卡；ranges 可指定区间。
  */
 export async function scanLanAdb(port = 5555, opts: ScanOptions = {}): Promise<string[]> {
   const { timeoutMs = 400, concurrency = 128, allSubnets = false } = opts
@@ -262,15 +256,9 @@ export class AdbClient {
   }
 
   /**
-   * 启动 `adb track-devices` 长连接监听：设备列表的任何变化（USB 插拔、tcpip
-   * connect/disconnect、device↔offline↔unauthorized 状态切换）都会立刻推送一条
-   * 消息，取代 3 秒轮询，设备发现延迟从最长 3s 降到毫秒级。
-   *
-   * 消息格式：4 字节十六进制长度前缀 + 该长度的设备列表文本（与 `adb devices`
-   * 输出相同）。连接建立后 adb 会先推一次当前列表。adb server 被杀时该进程退出
-   * （触发 'close'），由调用方决定重启策略。
-   *
-   * 返回子进程，调用方负责 kill；仅监听 'error'（spawn 失败）与解析回调。
+   * `adb track-devices` 长连接：设备列表任何变化即时推送，取代 3 秒轮询。
+   * 消息格式 = 4 字节十六进制长度前缀 + 设备列表文本；连上先推一次当前列表。
+   * 返回子进程，调用方负责 kill。
    */
   trackDevices(onChange: (devicesText: string) => void, onError: (err: Error) => void): ChildProcess {
     const child = spawn(this.path, ['track-devices'], {
@@ -433,15 +421,8 @@ export class AdbClient {
   }
 
   /**
-   * 移动 / 复制一组文件到目标目录。
-   *
-   * 逐个处理（一次 adb shell 一个源）而不是拼成一个大脚本：
-   *   - 每个条目都能拿到自己的退出码和报错，批量里坏一个不影响其余；
-   *   - 不用把 N 个路径拼进同一条命令行，避免长列表撞上命令长度限制。
-   * 代价是 N 次往返（单次约几十毫秒），几十个文件完全够用。
-   *
-   * ★ 覆盖语义是"先删目标再放入"，不是 cp -r 的合并语义
-   *   （cp 遇到同名目录会往里面再套一层，用户看到的和"覆盖"不是一回事）。
+   * 移动 / 复制一组文件到目标目录：逐个处理，各自拿退出码，坏一个不影响其余。
+   * ⚠️ 覆盖语义是"先删目标再放入"，不是 cp -r 的合并语义。
    */
   async transferPaths(
     serial: string,

@@ -4,39 +4,9 @@ import { resolveKeycode } from './scriptengine'
 import type { ControlCommand } from '@shared/types'
 
 /**
- * Python 外挂桥：一个只监听 127.0.0.1 的小型 HTTP 服务，
- * 让外部 Python 脚本（标准库 urllib 即可，零 pip 依赖）控制**当前投屏会话**。
- *
- * 设计与 ScriptEngine 同构：宿主注入 hooks（列会话 / 发控制指令 / 截屏），
- * 桥自己不碰 adb、不碰 ScrcpySession —— 设备操作全部复用与手动控制、
- * JS 脚本同一条 sendControl 链路（scrcpy 控制协议，<10ms 注入延迟）。
- *
- * 鉴权：Bearer Token（应用每次启动随机生成，设置面板可见）。
- * 坐标约定与 JS 引擎一致：视频像素坐标，桥按会话当前视频宽高换成协议参数。
- *
- * 端点（均为 JSON；错误返回 { "error": "..." } + 对应状态码）：
- * - GET  /api/v1/info                    会话列表（含 sessionId / serial / 视频宽高）
- * - POST /api/v1/tap                     { x, y, durationMs?, sessionId? }
- * - POST /api/v1/swipe                   { x1, y1, x2, y2, durationMs?, sessionId? }
- * - POST /api/v1/key                     { key, durationMs?, metastate?, sessionId? }
- * - POST /api/v1/text                    { text, sessionId? }
- * - POST /api/v1/touchdown              { finger?(0~9), x, y, sessionId? }   多指原语：按下，立即返回
- * - POST /api/v1/touchmove              { finger, x, y, sessionId? }         多指原语：拖动（须先 touchdown）
- * - POST /api/v1/touchup                { finger|'all', sessionId? }         多指原语：抬起（幂等；all 一次全抬）
- * - GET  /api/v1/screenshot?sessionId=   返回 PNG 二进制（adb screencap，设备原始分辨率）
- * - GET  /api/v1/frame?sessionId=        返回 PNG 二进制（投屏视频分辨率最近一帧，~10ms 级）
- *
- * screenshot 与 frame 的语义差异（模板/比色必须与所用通道同源）：
- * - screenshot = adb screencap，设备原始分辨率，300~500ms/次，适合采集模板/低频大图；
- * - frame      = 投屏视频流最近一帧（渲染层 canvas 直出），快一个量级，适合高频比色/OCR。
- * 两条通道独立（adb 隧道 vs 内存复制），互不影响；frame 需该会话的 MirrorView 已挂载。
- *
- * 多指原语与 tap/swipe 的本质区别：**tap/swipe 手势完成才返回**（防同 pointerId 交错）；
- * **touchdown/move/up 立即返回**，时序由 Python 侧控制 —— 因此"手指要抬起来"的铁律落在
- * 调用方头上，桥做两层兜底：touchup 幂等 + 会话消失时清理跟踪（控制 socket 已死，无需补发）。
- * finger 编号 0~9 = Android 触摸屏触点上限（协议层 pointerId 是 u64，这里主动收口防滥用）。
- *
- * sessionId 省略时：恰好一个会话就用它；零个或多个都要显式指定（避免误控）。
+ * Python 外挂桥：仅监听 127.0.0.1 的 HTTP 服务，供外部脚本控制当前投屏会话。
+ * 与 ScriptEngine 同构（宿主注入 hooks），设备操作复用同一条 sendControl 链路；Bearer Token 鉴权。
+ * 端点清单与参数说明见发布页；坐标一律为视频像素。sessionId 省略时仅在单会话下自动选中。
  */
 
 /** 带 HTTP 状态码的业务错误（路由层统一转成 JSON 响应） */

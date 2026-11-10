@@ -360,16 +360,8 @@ export interface UpdateSnapshot {
 }
 
 /**
- * Keyboard → on-screen action types.
- *
- * - `tap`    : keydown → DOWN, keyup → UP. If `duration > 0`, auto UP after N ms (long-press tap).
- * - `hold`   : keydown → DOWN, keyup → UP. Held while key pressed (WASD walking, sustained fire).
- * - `repeat` : keydown → DOWN, then DOWN+UP every `repeatMs` ms (auto-fire / combo). keyup → UP.
- * - `view`   : keydown → DOWN at (x, y), then MOVE in direction (viewDx, viewDy) every `repeatMs` ms.
- *              keyup → UP. Used for keyboard-driven view rotation.
- * - `swipe`  : keydown → DOWN at (x, y), animate MOVE to (x2, y2) over `duration` ms, then UP.
- *              One-shot per keydown.
- * - `keycode`: keydown → Android keycode DOWN, keyup → keycode UP.
+ * 键盘 → 屏幕动作类型。
+ * tap 点按（duration>0 = 长按）｜hold 按住｜repeat 连发｜view 方向键视角｜swipe 一次滑动｜keycode 直发按键
  */
 export type KeymapAction = 'tap' | 'hold' | 'repeat' | 'view' | 'swipe' | 'keycode'
 

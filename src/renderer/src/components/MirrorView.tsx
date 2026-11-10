@@ -175,19 +175,9 @@ export function MirrorView({
   }, [debug, fileLog])
 
   /**
-   * 把画布的 CSS 显示尺寸按「等比缩放 + 完整可见」写成显式像素。
-   *
-   * 为什么不用纯 CSS：canvas 的 width/height:auto 以**解码缓冲尺寸**为基准，max-width/height
-   * 只能压小不能放大（窗口拖大画布纹丝不动）；而且 .mirror-wrap 高度是 auto 时百分比
-   * max-height 会被浏览器当成 none，竖屏画布会溢出后被 .stage 的 overflow:hidden 裁掉大半。
-   * 详见 videoFit.ts 顶部注释。
-   *
-   * ⚠️ 画面**永远不会被拉长/拉宽**：算出来的一定是等比尺寸（盒子比 == 源比）。
-   * 全屏也走这里 —— 原来全屏靠 CSS 的 width/height:100% 铺满，会把竖屏流横向拉宽
-   * 约 2.6 倍（实测画正圆会变椭圆），现在改成同样的 contain。
-   *
-   * 设置里关掉「随窗口自适应」时必须清掉行内宽高（否则行内样式会压过 CSS），
-   * 让布局回到原来的静态行为（全屏=CSS 铺满，窗口=解码尺寸基准）。
+   * 按「等比缩放 + 完整可见」把画布显示尺寸写成显式像素（原理见 videoFit.ts）。
+   * 画面永不被拉长/拉宽；全屏也走这里，避免竖屏流被横向拉宽。
+   * 关掉「随窗口自适应」时必须清掉行内宽高，让 CSS 重新接管。
    */
   const fitCanvas = useCallback((): void => {
     const canvas = canvasRef.current
