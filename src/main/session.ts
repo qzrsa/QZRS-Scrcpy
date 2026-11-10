@@ -196,9 +196,12 @@ export class ScrcpySession {
     // 裁剪 W:H:X:Y（服务端裁剪后再编码）。格式非法会直接丢给服务端抛异常拆会话，
     // 这里做一次防御性校验：只认 4 段非负整数且宽高 > 0 的串，别的当成没填。
     if (o.crop && /^\d+:\d+:\d+:\d+$/.test(o.crop)) args.push(`crop=${o.crop}`)
-    // 画面旋转：angle 是服务端选项（OpenGL 仿射变换旋转后编码，90/270 会宽高对调），
-    // 客户端收到的就是已旋转的帧，无需重映射坐标。0 = 不转，不下发。
-    if (o.angle) args.push(`angle=${o.angle}`)
+    // 画面旋转：必须用 capture_orientation（锁定方向），不能用 angle。
+    // `angle` 只是在**原画布内**旋转内容（VideoFilter.addAngle 不修改输出尺寸），
+    // 90° 时会变成 1080x1920 的框里塞一张转过来的画面 → 黑边/被裁。
+    // capture_orientation=@N 由服务端先把画面归位到自然方向再转 N 度，
+    // 90/270 会真正对调编码宽高（真机实测：@90 → 1920x1080）。0 = 不锁定（跟随设备旋转），不下发。
+    if (o.angle) args.push(`capture_orientation=@${o.angle}`)
     // 音频参数只在开启时下发。audio_source=output 会让服务端把设备端外放静音，
     // 这是 scrcpy 的既定语义（不是 bug），设置页已有说明。
     if (o.audio) {

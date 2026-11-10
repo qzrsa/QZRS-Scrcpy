@@ -40,8 +40,8 @@ export interface DeviceHistoryEntry {
 export type VideoCodec = 'h264' | 'h265' | 'av1'
 
 /**
- * 画面旋转角度（scrcpy `angle`，服务端用 OpenGL 仿射变换旋转后再编码，
- * 90/270 时编码分辨率也会随之宽高对调）。0 = 不旋转。
+ * 画面旋转角度（下发为 scrcpy `capture_orientation=@N`，服务端锁定采集方向后再编码，
+ * 90/270 时编码分辨率会真正宽高对调）。0 = 不锁定，跟随设备当前方向。
  */
 export type VideoAngle = 0 | 90 | 180 | 270
 
