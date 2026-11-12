@@ -13,6 +13,10 @@ Thumbs.db
 # 按键方案（运行时生成，存于安装目录 keymaps/ 或 userData）
 keymaps/
 
+# 用户脚本（运行时生成于安装目录 scripts/ 或 userData；游戏自动化脚本属于个人使用，不进版本库）
+# 只锚定仓库根目录，不影响 .github/scripts/ 下的 CI 脚本
+/scripts/
+
 # AI 生图原始带水印产物（ImageGen 输出，处理后用 icon.png）
 resources/App_icon_*.png
 
