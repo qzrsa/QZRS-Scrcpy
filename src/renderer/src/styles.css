@@ -2393,9 +2393,11 @@ body.drawer-resizing {
   color: var(--text-faint);
 }
 
+/* 操作列宽必须容得下 4 个按钮：4×28 + 3×gap2 = 118，取 120（列宽固定，
+   各行的 grid 是独立容器，用 max-content 会导致行与表头列宽不一致） */
 .fm-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 78px 122px 66px;
+  grid-template-columns: minmax(0, 1fr) 78px 122px 120px;
   gap: 8px;
   align-items: center;
 }
@@ -2481,8 +2483,16 @@ body.drawer-resizing {
 
 .fm-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 2px;
+  min-width: 0;
+}
+
+/* 行内按钮比全局 34px 小一号，否则 4 个按钮塞不进操作列（曾压住「修改时间」） */
+.fm-actions .icon-btn {
+  width: 28px;
+  height: 28px;
 }
 
 .fm-danger:hover:not(:disabled) {
@@ -2540,7 +2550,7 @@ body.drawer-resizing {
 
 /* ---- 批量模式：行首多出勾选列（表头与行必须同步加列，否则整行错位）---- */
 .fm-grid.selecting {
-  grid-template-columns: 16px minmax(0, 1fr) 78px 122px 66px;
+  grid-template-columns: 16px minmax(0, 1fr) 78px 122px 120px;
 }
 
 .fm-check {
