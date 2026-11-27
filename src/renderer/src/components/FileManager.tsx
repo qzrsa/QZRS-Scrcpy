@@ -130,12 +130,15 @@ export function FileManager({ serial }: { serial: string }): JSX.Element {
     setError(null)
     let ok = 0
     const failed: string[] = []
+    // 远端给完整文件名，别让 adb 推断（见 filedrop.ts 同一处注释）
+    const dir = path.replace(/\/+$/, '')
     for (let i = 0; i < files.length; i++) {
-      setStatus(`上传中 ${i + 1}/${files.length}：${files[i].split(/[\\/]/).pop()}`)
+      const name = files[i].split(/[\\/]/).pop() || 'file'
+      setStatus(`上传中 ${i + 1}/${files.length}：${name}`)
       // eslint-disable-next-line no-await-in-loop
-      const r = await window.api.pushFile(serial, files[i], path)
+      const r = await window.api.pushFile(serial, files[i], `${dir}/${name}`)
       if (r.ok) ok++
-      else failed.push(`${files[i].split(/[\\/]/).pop()}（${r.message || '失败'}）`)
+      else failed.push(`${name}（${r.message || '失败'}）`)
     }
     setUploading(false)
     setStatus(

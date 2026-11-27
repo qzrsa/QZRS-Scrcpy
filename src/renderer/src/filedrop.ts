@@ -139,8 +139,10 @@ export function useStageFileDrop(o: {
           const name = baseName(paths[i])
           if (paths.length > 1) cbRef.current.onToast(`正在传 ${i + 1}/${paths.length}：${name}`, 'info')
           else cbRef.current.onToast(`正在传 ${name}…`, 'info')
+          // 远端要给完整文件名：adb 在「目标是目录」时自己推断文件名，碰上
+          // Windows 反斜杠路径（D:\浏览器下载\x.apk）会拼出带父目录名的怪路径。
           // eslint-disable-next-line no-await-in-loop
-          const r = await window.api.pushFile(serial, paths[i], DROP_TARGET)
+          const r = await window.api.pushFile(serial, paths[i], `${DROP_TARGET}/${name}`)
           if (r.ok) ok++
           else failed.push(`${name}（${r.message || '失败'}）`)
         }

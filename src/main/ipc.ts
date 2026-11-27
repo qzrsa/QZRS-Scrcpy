@@ -1725,7 +1725,12 @@ export function registerIpc(store: Store): AppManager {
   ipcMain.handle('device:push', async (_e, serial: string, localPath: string, remotePath: string) => {
     try {
       const a = ensureAdb()
-      const r = await a.push(serial, localPath, remotePath)
+      // 以 "/" 结尾 = 目标目录：文件名由我们自己拼，不能交给 adb 推断。
+      // Windows 版 adb 在 remote 是目录时按 "/" 切本地路径取文件名，遇到
+      // `D:\浏览器下载\x.apk` 这种反斜杠路径会拼成 `/sdcard/Download/浏览器下载\x.apk`
+      // → remote couldn't create file: Operation not permitted。
+      const target = remotePath.endsWith('/') ? remotePath + basename(localPath) : remotePath
+      const r = await a.push(serial, localPath, target)
       return { ok: r.code === 0, message: (r.stdout || r.stderr).trim() }
     } catch (err) {
       return { ok: false, message: err instanceof Error ? err.message : String(err) }
