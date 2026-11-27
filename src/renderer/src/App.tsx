@@ -12,7 +12,7 @@ import { ScriptPanel } from './components/ScriptPanel'
 import { ClipboardDialog } from './components/ClipboardDialog'
 import { StatsOverlay } from './components/StatsOverlay'
 import { IconPhone, IconFullscreen } from './components/icons'
-import { useStageFileDrop, DROP_TARGET } from './filedrop'
+import { useStageFileDrop, pushFilesToDevice, DROP_TARGET } from './filedrop'
 
 type Panel = 'settings' | 'keymap' | 'tools' | 'script'
 
@@ -383,6 +383,7 @@ export default function App(): JSX.Element {
         onOpenSettings={() => openSettings()}
         onOpenUpdate={() => openSettings('update')}
         updateHint={updateHint}
+        onDropFiles={(serial, files) => void pushFilesToDevice(serial, files, showToast)}
       />
 
       <main className="main">

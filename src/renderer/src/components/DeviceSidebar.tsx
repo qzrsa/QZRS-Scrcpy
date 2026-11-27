@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, type DragEvent, type KeyboardEvent, type MouseEvent } from 'react'
 import type { DeviceInfo } from '@shared/types'
 import { useApp } from '../store'
+import { hasFiles } from '../filedrop'
 import { IconRefresh, IconWifi, IconUsb, IconPhone, IconPlay, IconSettings } from './icons'
 import { ContextMenu, type MenuItem, type MenuState } from './ContextMenu'
 
@@ -17,6 +18,8 @@ interface Props {
    * 发现新版本 / 已下好待重启。指向设置页的软件更新区。
    */
   updateHint?: string | null
+  /** 把文件拖到某台设备的卡片上 → 传到该设备（不必先开投屏） */
+  onDropFiles?: (serial: string, files: File[]) => void
 }
 
 export function DeviceSidebar({
@@ -26,7 +29,8 @@ export function DeviceSidebar({
   onOpenConnect,
   onOpenSettings,
   onOpenUpdate,
-  updateHint
+  updateHint,
+  onDropFiles
 }: Props): JSX.Element {
   const { devices, sessions, refreshDevices, stopSession } = useApp()
   const [busy, setBusy] = useState<string | null>(null)
@@ -36,6 +40,8 @@ export function DeviceSidebar({
   // 拖动排序状态：dragOver 记录目标卡片与插入位置（上半=前面，下半=后面）
   const dragSerialRef = useRef<string | null>(null)
   const [dragOver, setDragOver] = useState<{ serial: string; pos: 'before' | 'after' } | null>(null)
+  /** 外部文件悬停在哪张卡片上（与内部排序的 dragOver 分开，避免互相干扰） */
+  const [fileOver, setFileOver] = useState<string | null>(null)
   // 稳定引用：ContextMenu 的 document 监听依赖它，每次渲染换新函数会反复重订阅
   const closeMenu = useCallback(() => setMenu(null), [])
 
@@ -121,6 +127,13 @@ export function DeviceSidebar({
   }
 
   const onCardDragOver = (e: DragEvent<HTMLDivElement>, serial: string): void => {
+    // 外部文件拖到卡片上：给「可以放」的反馈，不参与排序（排序只看 dragSerialRef）
+    if (hasFiles(e)) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+      if (fileOver !== serial) setFileOver(serial)
+      return
+    }
     if (!dragSerialRef.current || dragSerialRef.current === serial) return
     e.preventDefault()
     e.dataTransfer.dropEffect = 'move'
@@ -129,7 +142,24 @@ export function DeviceSidebar({
     if (dragOver?.serial !== serial || dragOver.pos !== pos) setDragOver({ serial, pos })
   }
 
+  /** 文件拖出卡片（没放下）时收回高亮；穿过子元素不算离开 */
+  const onCardDragLeave = (e: DragEvent<HTMLDivElement>): void => {
+    if (!hasFiles(e)) return
+    const to = e.relatedTarget as Node | null
+    if (to && e.currentTarget.contains(to)) return
+    setFileOver(null)
+  }
+
   const onCardDrop = (e: DragEvent<HTMLDivElement>, serial: string): void => {
+    // 文件落到卡片上 = 传到这台设备（不需要先开投屏）
+    if (hasFiles(e)) {
+      e.preventDefault()
+      e.stopPropagation()
+      setFileOver(null)
+      const files = Array.from(e.dataTransfer.files)
+      if (files.length > 0) onDropFiles?.(serial, files)
+      return
+    }
     e.preventDefault()
     const pos = dragOver?.serial === serial ? dragOver.pos : 'before'
     void reorderTo(serial, pos)
@@ -138,6 +168,7 @@ export function DeviceSidebar({
   const onCardDragEnd = (): void => {
     dragSerialRef.current = null
     setDragOver(null)
+    setFileOver(null)
   }
 
   /** 右键菜单：原设备行右侧的「显示器+播放」图标按钮已收进这里 */
@@ -237,10 +268,11 @@ export function DeviceSidebar({
               key={d.serial}
               className={`device-card ${isSelected ? 'active' : ''} ${d.known ? 'known' : ''} ${
                 dragOver?.serial === d.serial ? `drag-over-${dragOver.pos}` : ''
-              }`}
+              } ${fileOver === d.serial ? 'file-drop' : ''}`}
               draggable={!isRenaming}
               onDragStart={(e) => onCardDragStart(e, d.serial)}
               onDragOver={(e) => onCardDragOver(e, d.serial)}
+              onDragLeave={onCardDragLeave}
               onDrop={(e) => onCardDrop(e, d.serial)}
               onDragEnd={onCardDragEnd}
               onClick={() => {

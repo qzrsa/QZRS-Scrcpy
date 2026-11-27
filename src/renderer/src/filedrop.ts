@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
 
 /**
- * 拖文件到投屏画面 → 推到设备。
+ * 拖文件到投屏画面 / 设备卡片 → 推到设备。
  *
  * 官方 scrcpy 的默认落点是 `/sdcard/`；这里选 `/sdcard/Download`：
  * 手机上「文件」App 的下载页直接能看到，也不会往手机根目录丢一堆东西。
@@ -11,6 +11,8 @@ import type { DragEvent as ReactDragEvent } from 'react'
 export const DROP_TARGET = '/sdcard/Download'
 
 export type DropToastType = 'info' | 'error' | 'success'
+
+type Toast = (msg: string, type?: DropToastType) => void
 
 export interface StageDrop {
   /** 是否有文件正悬停在投屏区（用来显示"松手传到手机"浮层） */
@@ -26,7 +28,7 @@ export interface StageDrop {
 }
 
 /** 只认真正的"拖文件"：设备卡片内部拖动排序走的是自定义 data，不能抢 */
-function hasFiles(e: ReactDragEvent | DragEvent): boolean {
+export function hasFiles(e: ReactDragEvent | DragEvent): boolean {
   const dt = e.dataTransfer
   return !!dt && Array.from(dt.types).includes('Files')
 }
@@ -35,20 +37,81 @@ function baseName(p: string): string {
   return p.split(/[\\/]/).pop() || p
 }
 
+/** 推送互斥（投屏区与设备卡片共用，避免两批交错） */
+let pushing = false
+
+/**
+ * 把一批本地文件推到设备的下载目录。
+ * 远端必须给完整文件名：adb 在「目标是目录」时自己按 "/" 切本地路径推断文件名，
+ * 碰上 Windows 反斜杠路径（D:\浏览器下载\x.apk）会拼出带父目录名的怪路径，
+ * 轻则 Operation not permitted，重则静默生成截断的错名文件。
+ */
+export async function pushFilesToDevice(serial: string, files: File[], onToast: Toast): Promise<void> {
+  // File → 本地绝对路径：Electron 32+ 没有了 file.path，只能靠 preload 的 webUtils
+  const paths = files
+    .map((f) => {
+      try {
+        return window.api.getPathForFile(f)
+      } catch {
+        return ''
+      }
+    })
+    .filter((p) => !!p)
+
+  if (paths.length === 0) {
+    onToast('没拿到本地文件路径（从压缩包/网页里直接拖出来的虚拟文件不支持）', 'error')
+    return
+  }
+  if (pushing) {
+    onToast('上一批还在传，等它传完再拖一次', 'info')
+    return
+  }
+
+  pushing = true
+  let ok = 0
+  const failed: string[] = []
+  try {
+    for (let i = 0; i < paths.length; i++) {
+      const name = baseName(paths[i])
+      if (paths.length > 1) onToast(`正在传 ${i + 1}/${paths.length}：${name}`, 'info')
+      else onToast(`正在传 ${name}…`, 'info')
+      // eslint-disable-next-line no-await-in-loop
+      const r = await window.api.pushFile(serial, paths[i], `${DROP_TARGET}/${name}`)
+      if (r.ok) ok++
+      else failed.push(`${name}（${r.message || '失败'}）`)
+    }
+  } catch (err) {
+    failed.push(err instanceof Error ? err.message : String(err))
+  } finally {
+    pushing = false
+  }
+
+  if (failed.length === 0) {
+    // APK 只是推到下载目录，不自动装：装应用会弹系统确认框，替用户点不合适
+    const apk = paths.some((p) => /\.apk$/i.test(p))
+    const names = paths.map(baseName)
+    const list = names.length > 1 ? `${names.length} 个文件` : names[0]
+    onToast(
+      `已传到 ${DROP_TARGET}：${list}${apk ? '（APK 在手机上点开即可安装）' : ''}`,
+      'success'
+    )
+  } else if (ok === 0) {
+    onToast(`传失败了：${failed.join('、')}`, 'error')
+  } else {
+    onToast(`传了 ${ok}/${paths.length}，失败：${failed.join('、')}`, 'error')
+  }
+}
+
 /**
  * @param serial 当前投屏设备的 serial（null = 没有活动会话）
  * @param onToast 状态/结果提示，直接接到 App 的 toast
  */
-export function useStageFileDrop(o: {
-  serial: string | null
-  onToast: (msg: string, type?: DropToastType) => void
-}): StageDrop {
+export function useStageFileDrop(o: { serial: string | null; onToast: Toast }): StageDrop {
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
   // dragenter/dragleave 会随着鼠标穿过子元素反复触发（成对出现），用计数消抖，
   // 否则浮层会疯狂闪烁。归零才算真的离开。
   const depth = useRef(0)
-  const busyRef = useRef(false)
   // 回调存 ref：挂载期只注册一次 DOM 监听，不必因为 onToast 换了引用而重绑
   const cbRef = useRef(o)
   cbRef.current = o
@@ -108,64 +171,9 @@ export function useStageFileDrop(o: {
       cbRef.current.onToast('先连接一台设备并开始投屏，再把文件拖进来', 'error')
       return
     }
-    if (busyRef.current) {
-      cbRef.current.onToast('上一批还在传，等它传完再拖一次', 'info')
-      return
-    }
 
-    // File → 本地绝对路径：Electron 32+ 没有了 file.path，只能靠 preload 的 webUtils
-    const paths = files
-      .map((f) => {
-        try {
-          return window.api.getPathForFile(f)
-        } catch {
-          return ''
-        }
-      })
-      .filter((p) => !!p)
-
-    if (paths.length === 0) {
-      cbRef.current.onToast('没拿到本地文件路径（从压缩包/网页里直接拖出来的虚拟文件不支持）', 'error')
-      return
-    }
-
-    busyRef.current = true
     setBusy(true)
-    void (async () => {
-      let ok = 0
-      const failed: string[] = []
-      try {
-        for (let i = 0; i < paths.length; i++) {
-          const name = baseName(paths[i])
-          if (paths.length > 1) cbRef.current.onToast(`正在传 ${i + 1}/${paths.length}：${name}`, 'info')
-          else cbRef.current.onToast(`正在传 ${name}…`, 'info')
-          // 远端要给完整文件名：adb 在「目标是目录」时自己推断文件名，碰上
-          // Windows 反斜杠路径（D:\浏览器下载\x.apk）会拼出带父目录名的怪路径。
-          // eslint-disable-next-line no-await-in-loop
-          const r = await window.api.pushFile(serial, paths[i], `${DROP_TARGET}/${name}`)
-          if (r.ok) ok++
-          else failed.push(`${name}（${r.message || '失败'}）`)
-        }
-      } catch (err) {
-        failed.push(err instanceof Error ? err.message : String(err))
-      } finally {
-        busyRef.current = false
-        setBusy(false)
-      }
-
-      if (failed.length === 0) {
-        // APK 只是推到下载目录，不自动装：装应用会弹系统确认框，替用户点不合适
-        const apk = paths.some((p) => /\.apk$/i.test(p))
-        cbRef.current.onToast(
-          `已传到 ${DROP_TARGET}：${ok} 个文件${apk ? '（APK 在手机上点开即可安装）' : ''}`,
-          'success'
-        )
-      } else if (ok === 0) {
-        cbRef.current.onToast(`传失败了：${failed.join('、')}`, 'error')
-      } else {
-        cbRef.current.onToast(`传了 ${ok}/${paths.length}，失败：${failed.join('、')}`, 'error')
-      }
-    })()
+    void pushFilesToDevice(serial, files, cbRef.current.onToast).finally(() => setBusy(false))
   }
 
   return {
